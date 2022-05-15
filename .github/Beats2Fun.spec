@@ -1,10 +1,8 @@
-# -*- mode: python ; coding: utf-8 -*-
-
-
 block_cipher = None
 
-a = Analysis(
-    ['Beats2Fun.py', 'Beats2Bar.py', 'Beats2Map.py'],
+# Fun
+a_fun = Analysis(
+    ['Beats2Fun.py'],
     pathex=[],
     binaries=[],
     datas=[('Resources', 'Resources')],
@@ -18,13 +16,10 @@ a = Analysis(
     cipher=block_cipher,
     noarchive=False,
 )
-
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
-
-# Fun
+pyz_fun = PYZ(a_fun.pure, a_fun.zipped_data, cipher=block_cipher)
 exe_fun = EXE(
-    pyz,
-    [('Beats2Fun.py','Beats2Bar.py', 'PY')],
+    pyz_fun,
+    a_fun.scripts,
     [],
     exclude_binaries=True,
     name='Beats2Fun',
@@ -42,9 +37,25 @@ exe_fun = EXE(
 )
 
 # Bar
+a_bar = Analysis(
+    ['Beats2Bar.py'],
+    pathex=[],
+    binaries=[],
+    datas=[],
+    hiddenimports=[],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
+    noarchive=False,
+)
+pyz_bar = PYZ(a_bar.pure, a_bar.zipped_data, cipher=block_cipher)
 exe_bar = EXE(
-    pyz,
-    [('Beats2Bar.py','Beats2Bar.py', 'PY')],
+    pyz_bar,
+    a_bar.scripts,
     [],
     exclude_binaries=True,
     name='Beats2Bar',
@@ -62,9 +73,25 @@ exe_bar = EXE(
 )
 
 # Map
+a_map = Analysis(
+    ['Beats2Map.py'],
+    pathex=[],
+    binaries=[],
+    datas=[],
+    hiddenimports=[],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
+    noarchive=False,
+)
+pyz_map = PYZ(a_map.pure, a_map.zipped_data, cipher=block_cipher)
 exe_map = EXE(
-    pyz,
-    [('Beats2Map.py','Beats2Map.py', 'PY')],
+    pyz_map,
+    a_map.scripts,
     [],
     exclude_binaries=True,
     name='Beats2Map',
@@ -83,13 +110,20 @@ exe_map = EXE(
 
 coll = COLLECT(
     exe_fun,
+    a_fun.binaries,
+    a_fun.zipfiles,
+    a_fun.datas,
+
     exe_bar,
+    a_bar.binaries,
+    a_bar.zipfiles,
+    a_bar.datas,
+
     exe_map,
-    
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    
+    a_map.binaries,
+    a_map.zipfiles,
+    a_map.datas,
+
     strip=False,
     upx=True,
     upx_exclude=[],

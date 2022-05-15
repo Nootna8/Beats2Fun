@@ -11,11 +11,10 @@ jobs:
     - name: Install requirements
       run: sudo apt-get install -y p7zip-full nsis
       
-    - name: Download ffmpeg
-      run: wget https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full-shared.7z
-      
-    - name: Unpack ffmpeg
-      run: 7z e ./ffmpeg-release-full-shared.7z -oResources/ffmpeg -ir\!bin
+    - name: Download and unpacking ffmpeg
+      run: |
+        wget https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full-shared.7z 
+        7z e ./ffmpeg-release-full-shared.7z -oResources/ffmpeg -ir\!bin
 
     - name: Copy spec
       run: cp .github/*.spec .

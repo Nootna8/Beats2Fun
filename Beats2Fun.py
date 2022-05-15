@@ -110,12 +110,14 @@ def make_pmv(beatinput, vid_folder, fps, recurse, clip_dist, num_vids, beatbar):
         write_beatfiles(all_beat_times, 'out/' + output_name, song_lenth)
         h.succeed()
         
-    print(output_name + " is done")
-    
-    notification.notify(
-        title = "Beats2Fun",
-        message = output_name + " is done",
-        timeout = 5)
+    print(output_file + " is done")
+    try:
+        notification.notify(
+            title = "Beats2Fun",
+            message = output_file + " is done",
+            timeout = 5)
+    except:
+        pass
     
     return True
 
