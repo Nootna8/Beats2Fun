@@ -49,7 +49,7 @@ def process_beats(beats, song_length, clip_dist):
 def detect_input(input):
     return beatutil.find_beats(input, song_required=True)
     
-def make_pmv(beatinput, vid_folder, fps, recurse, clip_dist, no_cuda, num_vids, beatbar):
+def make_pmv(beatinput, vid_folder, fps, recurse, clip_dist, num_vids, beatbar):
     with util.UHalo(text="Checking input") as h:
         detected_input = detect_input(beatinput)
         if not detected_input:
@@ -81,7 +81,7 @@ def make_pmv(beatinput, vid_folder, fps, recurse, clip_dist, no_cuda, num_vids, 
         print('No clips')
         return False
 
-    videos_file = videoutil.clips_generate_batched(clips, fps, not no_cuda)
+    videos_file = videoutil.clips_generate_batched(clips, fps)
     if not videos_file:
         print('Generating clips failed')
         return False
@@ -149,7 +149,6 @@ def main():
     )
     
     parser.add_argument('-recurse', metavar="Search resursive", help='Search videos recursively', action='store_true')
-    parser.add_argument('-no_cuda', metavar="Disable cuda", help='Skip trying to process video using GPU acceleration', action='store_true')
     parser.add_argument('-clip_dist', metavar="Clip distance", default=0.4, help='Minimal clip distance in seconds', type=float, widget='DecimalField')
     parser.add_argument('-fps', metavar="FPS", default=25, help='Output video FPS', type=int, widget='IntegerField')
     parser.add_argument('-num_vids', metavar="Video amount", default=0, help='How many videos to randomly select from the Video folder (0 means all)', type=int, widget='IntegerField')

@@ -3,7 +3,11 @@
 Inspired by: https://www.reddit.com/r/AutoPMVs/
 
 To run these set of tools either install Beats2Fun from the releases page: https://github.com/Nootna8/Beats2Fun/releases
-Or run it manually (make sure you have python installed first https://www.python.org/downloads/, and if needed also git: https://git-scm.com/downloads)
+
+To run the application manually, make you to have:
+ - Python: https://www.python.org/downloads/
+ - Git: https://git-scm.com/downloads
+ - Ffmpeg: https://www.gyan.dev/ffmpeg/builds/
 
 ```
 git clone https://github.com/Nootna8/Beats2Fun
@@ -40,7 +44,6 @@ positional arguments:
 optional arguments:
   -h, --help            show this help message and exit
   -recurse              Search videos recursively
-  -no_cuda              Skip trying to process video using GPU acceleration
   -clip_dist Clip distance
                         Minimal clip distance in seconds
   -fps FPS              Output video FPS

@@ -231,7 +231,7 @@ def batch(iterable, n=1):
     for ndx in range(0, l, n):
         yield iterable[ndx:min(ndx + n, l)]
 
-def clips_generate_batched(beat_clips, fps, cuda=False, batch_size=10, num_threads=4):
+def clips_generate_batched(beat_clips, fps, batch_size=10, num_threads=4):
     videos_file_name = util.get_tmp_file('txt')
     videos_file = open(videos_file_name, 'w')
     
@@ -252,7 +252,6 @@ def clips_generate_batched(beat_clips, fps, cuda=False, batch_size=10, num_threa
             batches.append({
                 'video': v,
                 'clips': clips,
-                'cuda': cuda,
                 'fps': fps
             })
 

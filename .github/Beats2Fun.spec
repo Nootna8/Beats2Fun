@@ -36,7 +36,7 @@ exe_fun = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon="program_icon.png"
+    icon="Resources/icon.ico"
 )
 
 # Bar
@@ -72,7 +72,7 @@ exe_bar = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon="program_icon.png"
+    icon="Resources/icon.ico"
 )
 
 # Map
@@ -108,7 +108,7 @@ exe_map = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon="program_icon.png"
+    icon="Resources/icon.ico"
 )
 
 coll = COLLECT(

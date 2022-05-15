@@ -8,8 +8,8 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
-    - name: Install 7z
-      run: sudo apt-get install -y p7zip-full  
+    - name: Install requirements
+      run: sudo apt-get install -y p7zip-full nsis zip
       
     - name: Download ffmpeg
       run: wget https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full-shared.7z
@@ -17,18 +17,24 @@ jobs:
     - name: Unpack ffmpeg
       run: 7z e ./ffmpeg-release-full-shared.7z -oResources/ffmpeg -ir\!bin
 
-    - name: Package Application
-      uses: JackMcKew/pyinstaller-action-windows@main
-      with:
-        path: .
-        spec: .github/Beats2Fun.spec
+    - name: Copy spec
+      run: cp .github/*.spec .
+      
+    - name: Building using pyinstaller
+      run: docker run -v "${{ github.workspace }}:/src" batonogov/pyinstaller-windows:python_3.9
+      
+    - name: Building as zip
+      run: cd dist && zip -r Beats2Fun.zip Beats2Fun/* && cd ${{ github.workspace }}
         
-    - name: Create installer
-      uses: joncloud/makensis-action@v3.6
-      with:
-        script-file: .github/Beats2Fun.nsi
-    
+    - name: Create windows installer
+      run: makensis .github/Beats2Fun.nsi
+      
     - uses: actions/upload-artifact@v2
       with:
-        name: Beats2Build-setup.exe
-        path: ./dist/
+        name: Beats2Fun-setup.exe
+        path: ./dist/Beats2Fun-setup.exe
+        
+    - uses: actions/upload-artifact@v2
+      with:
+        name: Beats2Fun.zip
+        path: ./dist/Beats2Fun.zip
