@@ -13,8 +13,6 @@ from turtle import position
 from matplotlib.pyplot import title
 
 from tqdm import tqdm
-ff_path = "C:\\dev\\Agen\\"
-
 from pydub import AudioSegment
 from pydub.utils import audioop
 
@@ -23,7 +21,9 @@ import util
 video_formats = ['.mp4', '.wmv', '.mov', '.m4v', '.mpg', '.avi', '.flv']
 
 def ffmpeg_run(pts_in, filters, pts_out, silent = True, expected_length = 0, description = None, bar_pos=None):
-    cmd_pts = [ff_path + 'ffmpeg -hide_banner -y'] + pts_in
+    ff_path = util.get_resource('ffmpeg/ffmpeg')
+
+    cmd_pts = [ff_path + ' -hide_banner -y'] + pts_in
     
     if filters:
         if len(filters) > 10:
@@ -113,7 +113,8 @@ def videos_get(vid_folder, vids_deep, num_vids):
     return video_states
     
 def video_length(v):
-    result = subprocess.run(ff_path + 'ffprobe -show_entries format=duration -v quiet -of csv="p=0" -i "%s"' % (v), stdout=subprocess.PIPE)
+    ff_path = util.get_resource('ffmpeg/ffprobe')
+    result = subprocess.run(ff_path + ' -show_entries format=duration -v quiet -of csv="p=0" -i "%s"' % (v), stdout=subprocess.PIPE)
     vid_length = result.stdout.strip()
     vid_length = float(vid_length)
     return vid_length

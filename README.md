@@ -1,4 +1,4 @@
-#Beats2Fun
+# Beats2Fun
 
 Inspired by: https://www.reddit.com/r/AutoPMVs/
 
@@ -14,7 +14,6 @@ git clone https://github.com/Nootna8/Beats2Fun
 cd Beats2Fun
 pip install -r requirements.txt
 python Beats2Fun.py
-
 ```
 
 All tools include a commandline interface and a graphical interface. Be default the GUI will always open
@@ -87,5 +86,4 @@ positional arguments:
 optional arguments:
   -h, --help  show this help message and exit
   -show       Opens the generated heatmap when done
-
 ```
