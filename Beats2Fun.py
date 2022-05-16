@@ -22,10 +22,6 @@ def write_beatfiles(beats, output_name, song_lenth):
     parsers.parsetxt.write_beats(beats, output_name)
     parsers.parsefs.write_beats(beats, output_name)
     beatutil.plot_beats(beats, output_name, song_lenth)
-
-def get_song_length(song):
-    result = subprocess.run('ffprobe -v quiet -show_entries format=duration -of csv="p=0" "%s"' % (song), stdout=subprocess.PIPE)
-    return float(result.stdout.strip())
     
 def process_beats(beats, song_length, clip_dist):
     if beats[0] == 0:
@@ -49,7 +45,9 @@ def process_beats(beats, song_length, clip_dist):
 def detect_input(input):
     return beatutil.find_beats(input, song_required=True)
     
-def make_pmv(beatinput, vid_folder, fps, recurse, clip_dist, num_vids, beatbar):
+def make_pmv(beatinput, vid_folder, fps, recurse, clip_dist, num_vids, beatbar, output_folder):
+    print("Input: {} - Video dir: {} - Output dir: {}".format(beatinput, vid_folder, output_folder))
+
     with util.UHalo(text="Checking input") as h:
         detected_input = detect_input(beatinput)
         if not detected_input:
@@ -57,15 +55,16 @@ def make_pmv(beatinput, vid_folder, fps, recurse, clip_dist, num_vids, beatbar):
             return False
         else:
             song = detected_input[0]
-            song_lenth = get_song_length(song)
+            song_lenth = videoutil.get_song_length(song)
             all_beat_times = detected_input[1]
             output_name = os.path.splitext(os.path.basename(song))[0] + '-PMV'
-            h.succeed('Input - Song: {} - Beatcount: {}, - Output: {} '.format(song, len(all_beat_times), output_name))
+            output_file = os.path.realpath('{}/{}.mp4'.format(output_folder, output_name))
+            h.succeed('Input - Song: {} - Beatcount: {}, - Output: {} '.format(song, len(all_beat_times), output_file))
 
-    if not os.path.exists('out'):
-        os.mkdir('out')
-
-    output_file = 'out/{}.mp4'.format(output_name)
+    if not output_folder:
+        output_folder = 'out'
+    if not os.path.exists(output_folder):
+        os.mkdir(output_folder)
     
     with util.UHalo(text="Getting and processing beats") as h:
         beats_reduced = process_beats(all_beat_times, song_lenth, clip_dist)
@@ -73,12 +72,12 @@ def make_pmv(beatinput, vid_folder, fps, recurse, clip_dist, num_vids, beatbar):
     
     videos = videoutil.videos_get(vid_folder, recurse, num_vids)
     if not videos:
-        print('No videos')
+        print('Getting videos failed')
         return False
     
     clips = videoutil.clips_get(videos, beats_reduced, fps)
     if not clips:
-        print('No clips')
+        print('Getting clips failed')
         return False
 
     videos_file = videoutil.clips_generate_batched(clips, fps)
@@ -107,7 +106,7 @@ def make_pmv(beatinput, vid_folder, fps, recurse, clip_dist, num_vids, beatbar):
         videoutil.clips_merge(output_file, song, videos_file, song_lenth)
 
     with util.UHalo(text="Witing beat files") as h:
-        write_beatfiles(all_beat_times, 'out/' + output_name, song_lenth)
+        write_beatfiles(all_beat_times, output_folder + '/' + output_name, song_lenth)
         h.succeed()
         
     print(output_file + " is done")
@@ -147,6 +146,17 @@ def main():
         metavar="Video folder",
         gooey_options={
             'message': "Pick video folder"
+        }
+    )
+    
+    parser.add_argument(
+        '-output_folder',
+        help='Where to store the output videos / scripts',
+        widget='DirChooser',
+        metavar="Output folder",
+        default="out",
+        gooey_options={
+            'message': "Pick output folder"
         }
     )
     

@@ -23,8 +23,10 @@ def find_beats(input, option=None, song_required=False):
     for p in loaded_parsers:
         beats = p.process_input(input, option)
         if not beats:
+            print('x1')
             continue
         if song_required and not beats[0]:
+            print('x2')
             continue
 
         return beats

@@ -40,6 +40,7 @@ def handle_input(simfile, option=None):
     files = os.listdir(file_base)
     songsearch = fnmatch.filter(files, '*.mp3') + fnmatch.filter(files, '*.ogg')
     if len(songsearch) == 0:
+        print("Song not found for: {}".format(simfile))
         return False
     
     song = file_base + '/' + songsearch[0]
@@ -57,13 +58,16 @@ def find_input(input):
 def process_input(input, option=None):
     if not os.path.exists(input):
         return False
-        
-    if not os.path.isfile(input):
+
+    if os.path.isfile(input):
+        return handle_input(input, option)
+
+    if os.path.isdir(input):
         input = find_input(input)
         if not input:
             return False
-            
-    return handle_input(input, option)
+
+    return False
 
 def find_options(input):
     if not os.path.exists(input):

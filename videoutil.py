@@ -21,7 +21,7 @@ import util
 video_formats = ['.mp4', '.wmv', '.mov', '.m4v', '.mpg', '.avi', '.flv']
 
 def ffmpeg_run(pts_in, filters, pts_out, silent = True, expected_length = 0, description = None, bar_pos=None):
-    ff_path = util.get_resource('ffmpeg/ffmpeg')
+    ff_path = util.get_resource('ffmpeg/ffmpeg.exe')
 
     cmd_pts = [ff_path + ' -hide_banner -y'] + pts_in
     
@@ -36,48 +36,54 @@ def ffmpeg_run(pts_in, filters, pts_out, silent = True, expected_length = 0, des
         
     cmd_pts += pts_out
     cmd = ' '.join(cmd_pts)
-    
-    has_error = False
-    
-    if not silent:
-        print(cmd)
-        os.system(cmd)
-        return True
 
-    pbar = None
-    last_pos = 0
-    if expected_length:
-        bar_end = math.ceil(expected_length)
-        pbar = tqdm(total=math.ceil(expected_length), desc=description, position=bar_pos)
-    
-    regx = re.compile(r"time=([\d\:\.]+)")
+    try:
+        error_msg = None
+        
+        if not silent:
+            print(cmd)
+            os.system(cmd)
+            return True
 
-    with subprocess.Popen(cmd, stdout=PIPE, stderr=STDOUT, bufsize=1, universal_newlines=True) as p:
-        for l in p.stdout:
-            if 'No decoder surfaces left' in l:
-                p.terminate()
-                has_error = True
-            if 'Error' in l:
-                p.terminate()
-                has_error = True
-            
-            status_line = regx.search(l)
-            if status_line and pbar:
-                current_time = from_timestamp(status_line[1])
-                newseconds = round(current_time - last_pos)
-                pbar.update(newseconds)
-                last_pos += newseconds
+        pbar = None
+        last_pos = 0
+        if expected_length:
+            bar_end = math.ceil(expected_length)
+            pbar = tqdm(total=math.ceil(expected_length), desc=description, position=bar_pos)
+        
+        regx = re.compile(r"time=([\d\:\.]+)")
 
-        p.wait()
-        retcode = p.returncode
-        if retcode != 0:
-            has_error = True
+        with subprocess.Popen(cmd, stdout=PIPE, stderr=STDOUT, bufsize=1, universal_newlines=True) as p:
+            for l in p.stdout:
+                if 'No decoder surfaces left' in l:
+                    p.terminate()
+                    error_msg = l
+                if 'Error' in l:
+                    p.terminate()
+                    error_msg = l
+                
+                status_line = regx.search(l)
+                if status_line and pbar:
+                    current_time = from_timestamp(status_line[1])
+                    newseconds = round(current_time - last_pos)
+                    pbar.update(newseconds)
+                    last_pos += newseconds
 
-    if has_error:
-        raise Exception("ffmpeg failed with {}: command: {}".format(retcode, cmd))
+            p.wait()
+            retcode = p.returncode
+            if retcode != 0 and not error_msg:
+                error_msg = "Invalid return code"
 
-    if pbar and last_pos != bar_end:
-        pbar.update(bar_end - last_pos)
+        if error_msg:
+            raise Exception(error_msg)
+
+        if pbar and last_pos != bar_end:
+            pbar.update(bar_end - last_pos)
+        
+    except BaseException as e:
+        print("Exception during ffmpeg: {} - {}".format(cmd, retcode))
+        raise e
+        
 
 def videos_get(vid_folder, vids_deep, num_vids):
     videos = glob(vid_folder + "/*.mp4") + glob(vid_folder + "/*.wmv")
@@ -93,7 +99,7 @@ def videos_get(vid_folder, vids_deep, num_vids):
     
     video_states = []
     
-    with util.Utqdm(total=len(videos), desc="Video clip analasys", ascii=False) as pbar:
+    with util.Utqdm(total=len(videos), desc="Video clip analasys") as pbar:
         def callback(result):
             pbar.update()
             util.handle_tqdm_out()
@@ -113,11 +119,26 @@ def videos_get(vid_folder, vids_deep, num_vids):
     return video_states
     
 def video_length(v):
-    ff_path = util.get_resource('ffmpeg/ffprobe')
-    result = subprocess.run(ff_path + ' -show_entries format=duration -v quiet -of csv="p=0" -i "%s"' % (v), stdout=subprocess.PIPE)
-    vid_length = result.stdout.strip()
-    vid_length = float(vid_length)
-    return vid_length
+    try:
+        ff_path = util.get_resource('ffmpeg/ffprobe.exe')
+        cmd = ff_path + ' -show_entries format=duration -v quiet -of csv="p=0" -i "%s"' % (v)
+        result = subprocess.run(ff_path + ' -show_entries format=duration -v quiet -of csv="p=0" -i "%s"' % (v), stdout=subprocess.PIPE)
+        vid_length = result.stdout.strip()
+        vid_length = float(vid_length)
+        return vid_length
+    except BaseException as e:
+        print("Exception during ffmpeg: {}".format(cmd))
+        raise e
+
+def get_song_length(song):
+    try:
+        ff_path = util.get_resource('ffmpeg/ffprobe.exe')
+        cmd = ff_path + ' -v quiet -show_entries format=duration -of csv="p=0" "%s"' % (song)
+        result = subprocess.run(cmd, stdout=subprocess.PIPE)
+        return float(result.stdout.strip())
+    except BaseException as e:
+        print("Exception during ffmpeg: {}".format(cmd))
+        raise e
 
 def videos_analyze_thread(v):
     start_skip = 10
@@ -167,6 +188,7 @@ def clips_get(videos, beats, fps):
         tries = len(videos)
         while not found:
             if tries <= 0:
+                print("Failed finding clip for beat: {} - {}".format(beat_start, beat_end))
                 return False
 
             beat_pos_osffset = util.clamp(beat_pos + (random.random() * 0.2 - 0.1), 0, 1)

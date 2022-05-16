@@ -10,6 +10,7 @@ from halo import Halo
 from tqdm import tqdm
 
 current_tmp_dir = False
+global app_mode
 app_mode = None
 
 def get_tmp_file(ext):
@@ -25,7 +26,9 @@ def get_tmp_dir():
     return current_tmp_dir
 
 def init_app_mode():
+    global app_mode
     app_mode = 'plain'
+
     if "--ignore-gooey" in sys.argv:
         app_mode = 'goo'
     elif len(sys.argv) >= 2:
@@ -37,7 +40,7 @@ def get_app_mode():
 def UHalo(**args):
     spinner = 'dots'
     if app_mode == 'goo':
-        spinner = {'interval': 1000, 'frames': ['.', '..', '...']}
+        spinner = {'interval': 1000, 'frames': ['.', '. .', '. . .']}
 
     return Halo(spinner=spinner, **args)
 
@@ -45,7 +48,11 @@ tout = None
 
 class Utqdm(tqdm):
     def __init__(self, iterable=None, **args):
-        super().__init__(iterable=iterable, **args)
+        if app_mode == 'goo':
+            super().__init__(iterable=iterable, **args, ascii=True)
+        else:
+            super().__init__(iterable=iterable, **args)
+            
         #tout = io.StringIO()
         
         #if app_mode != 'goo':
@@ -71,5 +78,5 @@ def clamp(n, smallest, largest):
     
 def get_resource(name):
     d = dirname(abspath(__file__))
-    ret = d  + "/Resources/" + name
+    ret = os.path.realpath(d  + "/Resources/" + name)
     return ret
