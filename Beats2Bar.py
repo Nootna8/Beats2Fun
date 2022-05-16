@@ -61,7 +61,7 @@ def run(args):
         h.succeed()
         
     with util.UHalo(text="Fetching video length") as h:
-       video_length = videoutil.video_length(args.video)
+       video_length = videoutil.get_media_length(args.video)
        h.succeed()
     
     result = apply_beatbar(beats=beats, video_length=video_length, **vars(args))

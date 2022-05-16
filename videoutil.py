@@ -21,8 +21,8 @@ import util
 
 video_formats = ['.mp4', '.wmv', '.mov', '.m4v', '.mpg', '.avi', '.flv']
 
-def ffmpeg_run(pts_in, filters, pts_out, silent = True, expected_length = 0, description = None, bar_pos=None):
-    cmd_pts = ['ffmpeg', ' -hide_banner -y'] + pts_in
+def ffmpeg_run(pts_in, filters, pts_out, silent = True, expected_length = 0, description = None, bar_pos=None, block=True):
+    cmd_pts = ['ffmpeg', '-hide_banner -y'] + pts_in
     
     if filters:
         if len(filters) > 10:
@@ -53,26 +53,34 @@ def ffmpeg_run(pts_in, filters, pts_out, silent = True, expected_length = 0, des
         
         regx = re.compile(r"time=([\d\:\.]+)")
 
-        with subprocess.Popen(cmd, stdout=PIPE, stderr=STDOUT, bufsize=1, universal_newlines=True) as p:
-            for l in p.stdout:
-                if 'No decoder surfaces left' in l:
-                    p.terminate()
-                    error_msg = l
-                if 'Error' in l:
-                    p.terminate()
-                    error_msg = l
-                
-                status_line = regx.search(l)
-                if status_line and pbar:
-                    current_time = from_timestamp(status_line[1])
-                    newseconds = round(current_time - last_pos)
-                    pbar.update(newseconds)
-                    last_pos += newseconds
+        if not block:
+            print(cmd)
+            with subprocess.Popen(cmd) as p:
+                p.wait()
+                retcode = p.returncode
+                if retcode != 0 and not error_msg:
+                    error_msg = "Invalid return code"
+        else:
+            with subprocess.Popen(cmd, stdout=PIPE, stderr=STDOUT, bufsize=1, universal_newlines=True) as p:
+                for l in p.stdout:
+                    if 'No decoder surfaces left' in l:
+                        p.terminate()
+                        error_msg = l
+                    if 'Error' in l:
+                        p.terminate()
+                        error_msg = l
+                    
+                    status_line = regx.search(l)
+                    if status_line and pbar:
+                        current_time = from_timestamp(status_line[1])
+                        newseconds = round(current_time - last_pos)
+                        pbar.update(newseconds)
+                        last_pos += newseconds
 
-            p.wait()
-            retcode = p.returncode
-            if retcode != 0 and not error_msg:
-                error_msg = "Invalid return code"
+                p.wait()
+                retcode = p.returncode
+                if retcode != 0 and not error_msg:
+                    error_msg = "Invalid return code"
 
         if error_msg:
             raise Exception(error_msg)
@@ -97,16 +105,19 @@ def ffprobe_run(pts_in):
         retcode = result.returncode
         if retcode != 0:
             raise Exception("Invalid return code")
-        return result.stdout.strip()
+        return result.stdout.strip().decode("utf-8")
     except BaseException as e:
         print("Exception during ffprobe: {}, Errorcode: {}".format(cmd, retcode))
         raise e
 
-def videos_get(vid_folder, vids_deep, num_vids):
-    videos = glob(vid_folder + "/*.mp4") + glob(vid_folder + "/*.wmv")
-    
-    if vids_deep:
-        videos += glob(vid_folder + "/**/*.mp4", recursive=True) + glob(vid_folder + "/**/*.wmv", recursive=True)
+def videos_get(vid_folder, vids_deep, num_vids, num_threads=4):
+    videos = []
+
+    for vf in vid_folder.split(';'):
+        for ext in video_formats:
+            videos += glob(vf + "/*" + ext)
+            if vids_deep:
+                videos += glob(vf + "/**/*" + ext, recursive=True)
         
     if num_vids > 0:
         random.shuffle(videos)
@@ -122,7 +133,7 @@ def videos_get(vid_folder, vids_deep, num_vids):
             util.handle_tqdm_out()
                     
         futures = []
-        with ThreadPoolExecutor(max_workers=6) as executor:
+        with ThreadPoolExecutor(max_workers=num_threads) as executor:
             for v in videos:
                 future = executor.submit(videos_analyze_thread, {'video': v})
                 future.add_done_callback(callback)
@@ -149,13 +160,17 @@ def videos_analyze_thread(v):
     end_skip = 10
 
     length = get_media_length(v['video'])
+    resolution = ffprobe_run(['-show_entries stream=width,height', '-of csv=p=0', '-i "{}"'.format( v['video'] ) ])
+    resolution = list(map(int, resolution.split(',')))
 
     ret = {
         'full_length': length,
         'start_at': start_skip,
         'end_at': length - end_skip,
         'usable_length': length - start_skip - end_skip,
-        'video': v['video']
+        'video': v['video'],
+        'width': resolution[0],
+        'height': resolution[1]
     }
         
     return ret
@@ -236,6 +251,7 @@ def clips_get(videos, beats, fps):
             'duration': beat_duration,
             
             'video': video_state['video'],
+            'video_state': video_state,
             'clip_start': clip_start,
             'clip_end': clip_end,
             
@@ -258,7 +274,7 @@ def batch(iterable, n=1):
     for ndx in range(0, l, n):
         yield iterable[ndx:min(ndx + n, l)]
 
-def clips_generate_batched(beat_clips, fps, resolution, batch_size=10, num_threads=4):
+def clips_generate_batched(beat_clips, fps, resolution, bitrate='3M', batch_size=10, num_threads=4, cuda=False):
     videos_file_name = util.get_tmp_file('txt')
     videos_file = open(videos_file_name, 'w')
     
@@ -276,11 +292,18 @@ def clips_generate_batched(beat_clips, fps, resolution, batch_size=10, num_threa
     for v,all_clips in video_clips.items():
         all_clips.sort(key=lambda x: x['clip_start'])
         for clips in batch(all_clips, batch_size):
+            
+            #can_cuda = cuda
+            #if can_cuda and clips[0]['video_state']['width'] > 4096:
+            #    can_cuda = False
+
             batches.append({
                 'video': v,
                 'clips': clips,
                 'fps': fps,
-                'resolution': resolution
+                'resolution': resolution,
+                'bitrate': bitrate,
+                'cuda': cuda
             })
 
     videos_file.close()
@@ -292,16 +315,24 @@ def clips_generate_batched(beat_clips, fps, resolution, batch_size=10, num_threa
 
         def callback(result):
             pbar.update()
-            util.handle_tqdm_out()
-        
+
+
         if not threaded:
             for c in batches:
                 callback(clips_generate_batched_thread(c))
+                pbar.update()
                 return False
         else:
+
             with ThreadPoolExecutor(max_workers=num_threads) as executor:
+                
+                shared_vars = {}
+
+                if cuda:
+                    shared_vars['cuda_sessions'] = 0
+
                 for c in batches:
-                    future = executor.submit(clips_generate_batched_thread, c)
+                    future = executor.submit(clips_generate_batched_thread, c, shared_vars)
                     future.add_done_callback(callback)
                     futures.append(future)
 
@@ -316,10 +347,29 @@ def clips_generate_batched(beat_clips, fps, resolution, batch_size=10, num_threa
     return videos_file_name
 
 
-def clips_generate_batched_thread(myargs):
-    tries = 3
+def clips_generate_batched_thread(myargs, shared_vars):
     cmd_in = []
     cmd_out = []
+
+    cuda_dec = myargs['cuda']
+    cuda_enc = myargs['cuda']
+
+
+    if cuda_enc and shared_vars['cuda_sessions'] >= 3:
+        cuda_enc = False
+    if cuda_dec and myargs['clips'][0]['video_state']['width'] > 4096:
+        cuda_dec = False
+
+    if not cuda_enc and not cuda_dec:
+       myargs['cuda'] = False 
+    
+    if cuda_enc:
+        shared_vars['cuda_sessions'] = shared_vars['cuda_sessions'] + 1
+
+    if cuda_dec:
+        cmd_in += ['-hwaccel cuda', '-hwaccel_output_format cuda']
+    if myargs['cuda']:
+        cmd_in.append('-extra_hw_frames 12')
 
     for i,c in enumerate(myargs['clips']):
         cmd_in += [
@@ -327,16 +377,40 @@ def clips_generate_batched_thread(myargs):
             '-i "{}"'.format(myargs['video']),
         ]
 
+        filters = [
+            'fps={}'.format(myargs['fps'])
+        ]
+
+        if myargs['cuda']:
+            if not cuda_dec:
+                filters.append('format=nv12,hwupload_cuda')
+
+            filters.append('scale_cuda={}:force_original_aspect_ratio=1'.format(myargs['resolution']))
+
+            if not cuda_enc:
+                filters.append('hwdownload,format=nv12')
+                
+            #'hwdownload,format=nv12',
+            #'pad={}:(ow-iw)/2:(oh-ih)/2'.format(myargs['resolution'])
+            
+        else:
+            filters += [
+                'scale={}:force_original_aspect_ratio=1'.format(myargs['resolution']),
+                #'pad={}:(ow-iw)/2:(oh-ih)/2'.format(myargs['resolution'])
+            ]
+
         cmd_out += [
             '-map {}:v:0'.format(i),
-            '-vf "fps={fps}:round=down,scale={resolution}:force_original_aspect_ratio=1,pad={resolution}:(ow-iw)/2:(oh-ih)/2"'.format(
-                fps = myargs['fps'],
-                resolution = myargs['resolution']
-            ),
+            '-vf "{}"'.format(','.join(filters)),
             '-frames {}'.format(c['framecount']),
-            '-t {}'.format(c['duration']+0.5),
-            #'-c:v h264_mf',
-            '-b:v 3M',
+            '-t {}'.format(c['duration']+0.5)
+        ]
+
+        if cuda_enc:
+            cmd_out.append('-c:v h264_nvenc')
+            
+        cmd_out +=[
+            '-b:v {}'.format(myargs['bitrate']),
             '{}/{}.mp4'.format(util.get_tmp_dir(), c['index'])
         ]
     
@@ -358,6 +432,11 @@ def clips_generate_batched_thread(myargs):
         if framecount != c['framecount']:
             raise Exception("{} has {} frames instead of the requestes {}".format(clip_out, framecount, c['framecount']))
 
+    if cuda_enc:
+        shared_vars['cuda_sessions'] = max(0, shared_vars['cuda_sessions'] - 1)
+    
+    return myargs
+
 
 def clips_merge(output, audio, vids_file, expected_length):
     cmd_in = [
@@ -376,7 +455,9 @@ def clips_merge(output, audio, vids_file, expected_length):
     if audio:
         cmd_out.append('-map 1:a:0')
 
-    ffmpeg_run(cmd_in, None, ['"{}"'.format(output)], expected_length=expected_length, description="Merging clips together")
+    cmd_out.append('"{}"'.format(output))
+
+    ffmpeg_run(cmd_in, None, cmd_out, expected_length=expected_length, description="Merging clips together", block=True)
 
 def timestamp(seconds):
     minutes = seconds // 60

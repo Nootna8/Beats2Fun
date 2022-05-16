@@ -12,6 +12,7 @@ import os
 import subprocess
 from subprocess import Popen, PIPE, STDOUT
 import tempfile
+import time
 
 import videoutil
 import beatutil
@@ -45,9 +46,7 @@ def process_beats(beats, song_length, clip_dist):
 def detect_input(input):
     return beatutil.find_beats(input, song_required=True)
     
-def make_pmv(beatinput, vid_folder, fps, recurse, clip_dist, num_vids, beatbar, output_folder, resolution):
-    print("Input: {} - Video dir: {} - Output dir: {}".format(beatinput, vid_folder, output_folder))
-
+def make_pmv(beatinput, vid_folder, fps, recurse, clip_dist, num_vids, beatbar, output_folder, resolution, bitrate, batch, threads, cuda):
     with util.UHalo(text="Checking input") as h:
         detected_input = detect_input(beatinput)
         if not detected_input:
@@ -70,7 +69,7 @@ def make_pmv(beatinput, vid_folder, fps, recurse, clip_dist, num_vids, beatbar, 
         beats_reduced = process_beats(all_beat_times, song_lenth, clip_dist)
         h.succeed()
     
-    videos = videoutil.videos_get(vid_folder, recurse, num_vids)
+    videos = videoutil.videos_get(vid_folder, recurse, num_vids, num_threads=threads)
     if not videos:
         print('Getting videos failed')
         return False
@@ -80,7 +79,7 @@ def make_pmv(beatinput, vid_folder, fps, recurse, clip_dist, num_vids, beatbar, 
         print('Getting clips failed')
         return False
 
-    videos_file = videoutil.clips_generate_batched(clips, fps, resolution)
+    videos_file = videoutil.clips_generate_batched(clips, fps, resolution, bitrate=bitrate, num_threads=threads, batch_size=batch, cuda=cuda)
     if not videos_file:
         print('Generating clips failed')
         return False
@@ -141,7 +140,7 @@ def main():
 
     parser.add_argument(
         'vid_folder',
-        help='Folder containg your input videos (.mp4, .wmv)',
+        help='Folder containg your input videos (.mp4, .wmv, ...). Use multiple folder by splitting them with folder1;folder2;folder3',
         widget='DirChooser',
         metavar="Video folder",
         gooey_options={
@@ -160,18 +159,29 @@ def main():
         }
     )
     
+    parser.add_argument('-num_vids',    metavar="Video amount",     default=0, help='How many videos to randomly select from the Video folder (0 means all)', type=int, widget='IntegerField')
     parser.add_argument('-recurse',     metavar="Search resursive", help='Search videos recursively', action='store_true')
-    parser.add_argument('-clip_dist',   metavar="Clip distance", default=0.4, help='Minimal clip distance in seconds', type=float, widget='DecimalField')
-    parser.add_argument('-fps',         metavar="FPS", default=25, help='Output video FPS', type=int, widget='IntegerField')
-    parser.add_argument('-resolution',  metavar="Resolution", action='store', default='1280:720', help='Output video Resolution')
-    parser.add_argument('-num_vids',    metavar="Video amount", default=0, help='How many videos to randomly select from the Video folder (0 means all)', type=int, widget='IntegerField')
-    parser.add_argument('-beatbar',     metavar="Beatbar", help='Add a beatbar to the output video', action='store_true')
+    parser.add_argument('-beatbar',     metavar="Beatbar",          help='Add a beatbar to the output video', action='store_true')
+    parser.add_argument('-clip_dist',   metavar="Clip distance",    default=0.4, help='Minimal clip distance in seconds', type=float, widget='DecimalField')
+    parser.add_argument('-fps',         metavar="FPS",              default=25, help='Output video FPS', type=int, widget='IntegerField')
+    parser.add_argument('-resolution',  metavar="Resolution",       default='1280:720', help='Output video Resolution')
+    parser.add_argument('-bitrate',     metavar="Bit rate",         default='3M', help='Output video bitrate (Higher numer is higher quality)')
+    parser.add_argument('-batch',       metavar="Batch size",       default=10, type=int, help='How many clips to split per thread')
+    parser.add_argument('-threads',     metavar="Thread count",     default=4, type=int, help='How many threads to use while generating')
+    parser.add_argument('-cuda',        metavar="GPU Acceleration", help='Use Nvidia GPU Acceleration', action='store_true')
 
     args = parser.parse_args()
+
+    if args.cuda and args.batch > 1:
+        print("When using cuda, '-batch 1' is required")
+        sys.exit(1)
     
     with tempfile.TemporaryDirectory() as tmpdir:
         util.current_tmp_dir = tmpdir
+        start_time = time.time()
         result = make_pmv(**vars(args))
+        if util.app_mode != 'goo':
+            print('Generation took: {}'.format(videoutil.timestamp(time.time() - start_time)))
         print('Cleanup ...')
     
     if not result:
@@ -179,4 +189,3 @@ def main():
     
 if __name__ == "__main__":
     main()
-    print('Done')
