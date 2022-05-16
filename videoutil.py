@@ -12,7 +12,8 @@ import random
 from turtle import position
 from matplotlib.pyplot import title
 
-from tqdm import tqdm
+import util
+
 from pydub import AudioSegment
 from pydub.utils import audioop
 
@@ -21,9 +22,7 @@ import util
 video_formats = ['.mp4', '.wmv', '.mov', '.m4v', '.mpg', '.avi', '.flv']
 
 def ffmpeg_run(pts_in, filters, pts_out, silent = True, expected_length = 0, description = None, bar_pos=None):
-    ff_path = util.get_resource('ffmpeg/ffmpeg.exe')
-
-    cmd_pts = [ff_path + ' -hide_banner -y'] + pts_in
+    cmd_pts = ['ffmpeg', ' -hide_banner -y'] + pts_in
     
     if filters:
         if len(filters) > 10:
@@ -36,6 +35,7 @@ def ffmpeg_run(pts_in, filters, pts_out, silent = True, expected_length = 0, des
         
     cmd_pts += pts_out
     cmd = ' '.join(cmd_pts)
+    retcode = -1
 
     try:
         error_msg = None
@@ -49,7 +49,7 @@ def ffmpeg_run(pts_in, filters, pts_out, silent = True, expected_length = 0, des
         last_pos = 0
         if expected_length:
             bar_end = math.ceil(expected_length)
-            pbar = tqdm(total=math.ceil(expected_length), desc=description, position=bar_pos)
+            pbar = util.Utqdm(total=math.ceil(expected_length), desc=description, position=bar_pos)
         
         regx = re.compile(r"time=([\d\:\.]+)")
 
@@ -81,9 +81,26 @@ def ffmpeg_run(pts_in, filters, pts_out, silent = True, expected_length = 0, des
             pbar.update(bar_end - last_pos)
         
     except BaseException as e:
-        print("Exception during ffmpeg: {} - {}".format(cmd, retcode))
+        if retcode == 255:
+            raise Exception("Canceled")
+
+        print("Exception during ffmpeg: {}, Errorcode: {}".format(cmd, retcode))
         raise e
-        
+
+def ffprobe_run(pts_in):
+    cmd_pts = ['ffprobe', '-v error'] + pts_in
+    cmd = ' '.join(cmd_pts)
+    retcode = -1
+
+    try:
+        result = subprocess.run(cmd, stdout=subprocess.PIPE)
+        retcode = result.returncode
+        if retcode != 0:
+            raise Exception("Invalid return code")
+        return result.stdout.strip()
+    except BaseException as e:
+        print("Exception during ffprobe: {}, Errorcode: {}".format(cmd, retcode))
+        raise e
 
 def videos_get(vid_folder, vids_deep, num_vids):
     videos = glob(vid_folder + "/*.mp4") + glob(vid_folder + "/*.wmv")
@@ -111,40 +128,27 @@ def videos_get(vid_folder, vids_deep, num_vids):
                 future.add_done_callback(callback)
                 futures.append(future)
 
-        for future in futures:
-            r = future.result()
-            video_states.append(r)
+            for future in futures:
+                try:
+                    r = future.result()
+                    video_states.append(r)
+                except BaseException as e:
+                    for f in futures:
+                        f.cancel()
+                    raise e
+            
 
     random.shuffle(video_states)
     return video_states
-    
-def video_length(v):
-    try:
-        ff_path = util.get_resource('ffmpeg/ffprobe.exe')
-        cmd = ff_path + ' -show_entries format=duration -v quiet -of csv="p=0" -i "%s"' % (v)
-        result = subprocess.run(ff_path + ' -show_entries format=duration -v quiet -of csv="p=0" -i "%s"' % (v), stdout=subprocess.PIPE)
-        vid_length = result.stdout.strip()
-        vid_length = float(vid_length)
-        return vid_length
-    except BaseException as e:
-        print("Exception during ffmpeg: {}".format(cmd))
-        raise e
 
-def get_song_length(song):
-    try:
-        ff_path = util.get_resource('ffmpeg/ffprobe.exe')
-        cmd = ff_path + ' -v quiet -show_entries format=duration -of csv="p=0" "%s"' % (song)
-        result = subprocess.run(cmd, stdout=subprocess.PIPE)
-        return float(result.stdout.strip())
-    except BaseException as e:
-        print("Exception during ffmpeg: {}".format(cmd))
-        raise e
+def get_media_length(input):
+    return float(ffprobe_run(['-show_entries format=duration', '-of csv="p=0"', '-i "{}"'.format(input)]))
 
 def videos_analyze_thread(v):
     start_skip = 10
     end_skip = 10
 
-    length = video_length(v['video'])
+    length = get_media_length(v['video'])
 
     ret = {
         'full_length': length,
@@ -254,7 +258,7 @@ def batch(iterable, n=1):
     for ndx in range(0, l, n):
         yield iterable[ndx:min(ndx + n, l)]
 
-def clips_generate_batched(beat_clips, fps, batch_size=10, num_threads=4):
+def clips_generate_batched(beat_clips, fps, resolution, batch_size=10, num_threads=4):
     videos_file_name = util.get_tmp_file('txt')
     videos_file = open(videos_file_name, 'w')
     
@@ -275,7 +279,8 @@ def clips_generate_batched(beat_clips, fps, batch_size=10, num_threads=4):
             batches.append({
                 'video': v,
                 'clips': clips,
-                'fps': fps
+                'fps': fps,
+                'resolution': resolution
             })
 
     videos_file.close()
@@ -316,8 +321,6 @@ def clips_generate_batched_thread(myargs):
     cmd_in = []
     cmd_out = []
 
-    frame_time = 1 / myargs['fps']
-
     for i,c in enumerate(myargs['clips']):
         cmd_in += [
             '-ss {}'.format(timestamp(c['clip_start'])),
@@ -326,16 +329,35 @@ def clips_generate_batched_thread(myargs):
 
         cmd_out += [
             '-map {}:v:0'.format(i),
-            #'-crf 23',
-            '-vf "fps={}:round=down,{}=1280:720:force_original_aspect_ratio=1,pad=1280:720:(ow-iw)/2:(oh-ih)/2"'.format(myargs['fps'], 'scale'),
+            '-vf "fps={fps}:round=down,scale={resolution}:force_original_aspect_ratio=1,pad={resolution}:(ow-iw)/2:(oh-ih)/2"'.format(
+                fps = myargs['fps'],
+                resolution = myargs['resolution']
+            ),
             '-frames {}'.format(c['framecount']),
-            '-t {}'.format(c['duration']),
-            '-c:v h264_mf',
+            '-t {}'.format(c['duration']+0.5),
+            #'-c:v h264_mf',
             '-b:v 3M',
             '{}/{}.mp4'.format(util.get_tmp_dir(), c['index'])
         ]
     
-    return ffmpeg_run(cmd_in, None, cmd_out, True)
+    ffmpeg_run(cmd_in, None, cmd_out, True)
+
+    for c in myargs['clips']:
+        clip_out = '{}/{}.mp4'.format(util.get_tmp_dir(), c['index'])
+        if not os.path.isfile(clip_out):
+            raise Exception("Failed splitting {}, {} was not found".format(myargs['video'], clip_out))
+
+        framecount = int(ffprobe_run([
+            '-select_streams v:0',
+            '-count_packets',
+            '-show_entries stream=nb_read_packets',
+            '-of csv=p=0',
+            '-i "{}"'.format(clip_out)]
+        ))
+
+        if framecount != c['framecount']:
+            raise Exception("{} has {} frames instead of the requestes {}".format(clip_out, framecount, c['framecount']))
+
 
 def clips_merge(output, audio, vids_file, expected_length):
     cmd_in = [

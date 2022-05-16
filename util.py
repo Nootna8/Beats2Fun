@@ -7,7 +7,8 @@ from os.path import dirname, abspath
 
 from contextlib import contextmanager
 from halo import Halo
-from tqdm import tqdm
+import tqdm
+import tqdm.utils
 
 current_tmp_dir = False
 global app_mode
@@ -34,36 +35,63 @@ def init_app_mode():
     elif len(sys.argv) >= 2:
         sys.argv.append("--ignore-gooey")
 
+    custom_ffpmeg = os.path.realpath(os.curdir + '/ffmpeg')
+    if os.path.isdir(custom_ffpmeg):
+        os.environ["PATH"] += os.pathsep + custom_ffpmeg
+
 def get_app_mode():
     return app_mode
 
 def UHalo(**args):
     spinner = 'dots'
+    placement = 'left'
     if app_mode == 'goo':
         spinner = {'interval': 1000, 'frames': ['.', '. .', '. . .']}
+        placement = 'right'
 
-    return Halo(spinner=spinner, **args)
+    return Halo(spinner=spinner, placement=placement, **args)
 
 tout = None
 
-class Utqdm(tqdm):
-    def __init__(self, iterable=None, **args):
-        if app_mode == 'goo':
-            super().__init__(iterable=iterable, **args, ascii=True)
-        else:
-            super().__init__(iterable=iterable, **args)
-            
-        #tout = io.StringIO()
+class Utqdm(tqdm.tqdm):
+    def __init__(self, *args, **kwargs):
         
-        #if app_mode != 'goo':
-        #    super().__init__(iterable=iterable, **args)
-        #else:
-        #    super().__init__(iterable=iterable, **args, file=tout)
+        kwargs = kwargs.copy()
+        
+        if app_mode == 'goo':
+            kwargs['ascii'] = True
+            kwargs['ncols'] = 80
+            kwargs['gui'] = True
+            kwargs['bar_format'] = "{desc}:{percentage:3.0f}% {r_bar}"
+        else:
+            kwargs['bar_format'] = "{desc:<30}{percentage:3.0f}%|{bar:50}{r_bar}"
 
-    def __del__(self):
-        #tout.close()
-        #tout = None
-        super().__del__()
+        super(Utqdm, self).__init__(*args, **kwargs)
+
+        if app_mode == 'goo':
+            self.sp = self.u_status_printer(self.fp)
+
+    @staticmethod
+    def u_status_printer(file):
+        fp = file
+        fp_flush = getattr(fp, 'flush', lambda: None)  # pragma: no cover
+        if fp in (sys.stderr, sys.stdout):
+            getattr(sys.stderr, 'flush', lambda: None)()
+            getattr(sys.stdout, 'flush', lambda: None)()
+
+        def fp_write(s):
+            fp.write(tqdm.utils._unicode(s))
+            fp_flush()
+
+        last_len = [0]
+
+        def print_status(s):
+            len_s = tqdm.utils.disp_len(s)
+            fp_write('\n' + s + (' ' * max(last_len[0] - len_s, 0)))
+            last_len[0] = len_s
+
+        return print_status
+
 
 def handle_tqdm_out():
     if tout:
@@ -78,5 +106,6 @@ def clamp(n, smallest, largest):
     
 def get_resource(name):
     d = dirname(abspath(__file__))
+    
     ret = os.path.realpath(d  + "/Resources/" + name)
     return ret

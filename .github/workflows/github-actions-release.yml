@@ -11,16 +11,15 @@ jobs:
     - name: Install requirements
       run: sudo apt-get install -y p7zip-full nsis
       
+    - name: Building using pyinstaller
+      run: |
+        cp .github/*.spec .
+        docker run -v "${{ github.workspace }}:/src" batonogov/pyinstaller-windows:python_3.9
+        
     - name: Download and unpacking ffmpeg
       run: |
         wget https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full-shared.7z 
-        7z e ./ffmpeg-release-full-shared.7z -oResources/ffmpeg -ir\!bin
-
-    - name: Copy spec
-      run: cp .github/*.spec .
-      
-    - name: Building using pyinstaller
-      run: docker run -v "${{ github.workspace }}:/src" batonogov/pyinstaller-windows:python_3.9
+        7z e ./ffmpeg-release-full-shared.7z -odist/Beats2Fun -ir\!bin
         
     - name: Create windows installer
       run: makensis .github/Beats2Fun.nsi

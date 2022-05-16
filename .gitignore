@@ -2,5 +2,5 @@ build
 dist
 __pycache__
 out
-Resources/ffmpeg
+ffmpeg
 ffmpeg-release-full-shared.7z
