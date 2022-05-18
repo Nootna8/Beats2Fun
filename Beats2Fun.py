@@ -4,6 +4,7 @@ util.init_app_mode()
 import sys
 
 from gooey import Gooey, GooeyParser
+import argparse
 from tqdm import tqdm
 from plyer import notification
 
@@ -13,7 +14,6 @@ import subprocess
 from subprocess import Popen, PIPE, STDOUT
 import tempfile
 import time
-
 import videoutil
 import beatutil
 import parsers.parsefs
@@ -125,7 +125,10 @@ def make_pmv(beatinput, vid_folder, fps, recurse, clip_dist, num_vids, beatbar, 
       default_size=(610, 650),
       image_dir=util.get_resource(''))
 def main():
-    parser = GooeyParser(description='Make a PMV based on a simfile')
+    parser = GooeyParser(
+        description='Make a PMV based on a simfile',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
     
     parser.add_argument(
         'beatinput',
@@ -158,19 +161,32 @@ def main():
             'message': "Pick output folder"
         }
     )
-    
-    parser.add_argument('-num_vids',    metavar="Video amount",     default=0, help='How many videos to randomly select from the Video folder (0 means all)', type=int, widget='IntegerField')
+
+    parser.add_argument('-num_vids',    metavar="Video amount",     default=0, help='How many videos to randomly select from the Video folder, 0=all)', type=int, widget='IntegerField')
     parser.add_argument('-recurse',     metavar="Search resursive", help='Search videos recursively', action='store_true')
     parser.add_argument('-beatbar',     metavar="Beatbar",          help='Add a beatbar to the output video', action='store_true')
     parser.add_argument('-clip_dist',   metavar="Clip distance",    default=0.4, help='Minimal clip distance in seconds', type=float, widget='DecimalField')
-    parser.add_argument('-fps',         metavar="FPS",              default=25, help='Output video FPS', type=int, widget='IntegerField')
-    parser.add_argument('-resolution',  metavar="Resolution",       default='1280:720', help='Output video Resolution')
-    parser.add_argument('-bitrate',     metavar="Bit rate",         default='3M', help='Output video bitrate (Higher numer is higher quality)')
-    parser.add_argument('-batch',       metavar="Batch size",       default=10, type=int, help='How many clips to split per thread')
-    parser.add_argument('-threads',     metavar="Thread count",     default=4, type=int, help='How many threads to use while generating')
-    parser.add_argument('-cuda',        metavar="GPU Acceleration", help='Use Nvidia GPU Acceleration', action='store_true')
+
+    quality_group = parser.add_argument_group("Quality Options")   
+    quality_group.add_argument('-fps',         metavar="FPS",              default=25, help='Output video FPS', type=int, widget='IntegerField')
+    quality_group.add_argument('-resolution',  metavar="Resolution",       default='1280:720', help='Output video Resolution')
+    quality_group.add_argument('-bitrate',     metavar="Bit rate",         default='3M', help='Output video bitrate (Higher numer is higher quality)')
+    
+    performance_group = parser.add_argument_group("Performance Options")   
+    performance_group.add_argument('-batch',       metavar="Batch size",       default=10, type=int, help='How many clips to split per thread')
+    performance_group.add_argument('-threads',     metavar="Thread count",     default=4, type=int, help='How many threads to use while generating')
+    performance_group.add_argument('-cuda',        metavar="GPU Acceleration", help='Use Nvidia GPU Acceleration', action='store_true')
+
+    
+    if util.app_mode == 'pre_goo':
+        parser.set_defaults(**util.config_load('Beats2Fun.last'))
 
     args = parser.parse_args()
+
+    if util.app_mode == 'goo':    
+        util.config_save('Beats2Fun.last', vars(args))
+
+    print(args)
 
     if args.cuda and args.batch > 1:
         print("When using cuda, '-batch 1' is required")

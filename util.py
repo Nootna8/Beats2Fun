@@ -4,6 +4,8 @@ import sys
 import io
 
 from os.path import dirname, abspath
+import platformdirs
+import json
 
 from contextlib import contextmanager
 from halo import Halo
@@ -26,6 +28,32 @@ def get_tmp_dir():
         raise "No tmp dir set"
     return current_tmp_dir
 
+def get_config_dir(create = False):
+    dir = platformdirs.user_config_dir() + '/Beats2Fun'
+    if not os.path.exists(dir) and create:
+        os.makedirs(dir)
+    return dir
+
+def config_load(category):
+    try:
+        config_file = get_config_dir() + '/' + category + '.json'
+        if not os.path.isfile(config_file):
+            return {}
+
+        with open(config_file) as c:
+            ret = json.load(c)
+            if not isinstance(ret, dict):
+                return {}
+            return ret
+    except:
+        print('Error loading config: {}'.format(category))
+        return {}
+
+def config_save(category, data):
+    config_file = get_config_dir(True) + '/' + category + '.json'
+    with open(config_file, 'w') as f:
+        json.dump(data, f, indent=4, sort_keys=True)
+
 def init_app_mode():
     global app_mode
     app_mode = 'plain'
@@ -33,7 +61,10 @@ def init_app_mode():
     if "--ignore-gooey" in sys.argv:
         app_mode = 'goo'
     elif len(sys.argv) >= 2:
+        app_mode = 'plain'
         sys.argv.append("--ignore-gooey")
+    else:
+        app_mode = 'pre_goo'
 
     custom_ffpmeg = os.path.realpath(os.curdir + '/ffmpeg')
     if os.path.isdir(custom_ffpmeg):
@@ -109,3 +140,4 @@ def get_resource(name):
     
     ret = os.path.realpath(d  + "/Resources/" + name)
     return ret
+
