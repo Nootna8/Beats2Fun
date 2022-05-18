@@ -46,7 +46,7 @@ def process_beats(beats, song_length, clip_dist):
 def detect_input(input):
     return beatutil.find_beats(input, song_required=True)
     
-def make_pmv(beatinput, vid_folder, fps, recurse, clip_dist, num_vids, beatbar, output_folder, resolution, bitrate, batch, threads, cuda):
+def make_pmv(beatinput, vid_folder, fps, recurse, clip_dist, num_vids, beatbar, output_folder, resolution, bitrate, batch, threads, cuda, volume):
     with util.UHalo(text="Checking input") as h:
         detected_input = detect_input(beatinput)
         if not detected_input:
@@ -74,7 +74,7 @@ def make_pmv(beatinput, vid_folder, fps, recurse, clip_dist, num_vids, beatbar, 
         print('Getting videos failed')
         return False
     
-    clips = videoutil.clips_get(videos, beats_reduced, fps)
+    clips = videoutil.clips_get(videos, beats_reduced, fps, volume)
     if not clips:
         print('Getting clips failed')
         return False
@@ -102,7 +102,7 @@ def make_pmv(beatinput, vid_folder, fps, recurse, clip_dist, num_vids, beatbar, 
 
             videoutil.video_merge_audio(vid_file_2, audio_result, output_file, song_lenth)
     else:
-        videoutil.clips_merge(output_file, song, videos_file, song_lenth)
+        videoutil.clips_merge(output_file, song, videos_file, song_lenth, volume)
 
     with util.UHalo(text="Witing beat files") as h:
         write_beatfiles(all_beat_times, output_folder + '/' + output_name, song_lenth)
@@ -166,6 +166,7 @@ def main():
     parser.add_argument('-recurse',     metavar="Search resursive", help='Search videos recursively', action='store_true')
     parser.add_argument('-beatbar',     metavar="Beatbar",          help='Add a beatbar to the output video', action='store_true')
     parser.add_argument('-clip_dist',   metavar="Clip distance",    default=0.4, help='Minimal clip distance in seconds', type=float, widget='DecimalField')
+    parser.add_argument('-volume',      metavar="Clip volume",      default=0.0, help='Keep the original clip audio, 0.1=10%)', type=float, widget='DecimalField')
 
     quality_group = parser.add_argument_group("Quality Options")   
     quality_group.add_argument('-fps',         metavar="FPS",              default=25, help='Output video FPS', type=int, widget='IntegerField')
@@ -186,10 +187,13 @@ def main():
     if util.app_mode == 'goo':    
         util.config_save('Beats2Fun.last', vars(args))
 
-    print(args)
-
     if args.cuda and args.batch > 1:
         print("When using cuda, '-batch 1' is required")
+        sys.exit(1)
+
+    pts = args.resolution.split(':')
+    if len(pts) != 2 or (int(pts[0]) %2) > 0 or (int(pts[1]) %2) > 0:
+        print("Unusable resolution: {}".format(args.resolution))
         sys.exit(1)
     
     with tempfile.TemporaryDirectory() as tmpdir:

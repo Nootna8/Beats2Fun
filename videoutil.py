@@ -36,6 +36,7 @@ def ffmpeg_run(pts_in, filters, pts_out, silent = True, expected_length = 0, des
     cmd_pts += pts_out
     cmd = ' '.join(cmd_pts)
     retcode = -1
+    output = []
 
     try:
         error_msg = None
@@ -70,6 +71,8 @@ def ffmpeg_run(pts_in, filters, pts_out, silent = True, expected_length = 0, des
                         p.terminate()
                         error_msg = l
                     
+                    output.append(l)
+                    
                     status_line = regx.search(l)
                     if status_line and pbar:
                         current_time = from_timestamp(status_line[1])
@@ -92,7 +95,7 @@ def ffmpeg_run(pts_in, filters, pts_out, silent = True, expected_length = 0, des
         if retcode == 255:
             raise Exception("Canceled")
 
-        print("Exception during ffmpeg: {}, Errorcode: {}".format(cmd, retcode))
+        print("Exception during ffmpeg: {}, Errorcode: {}, Output: {}".format(cmd, retcode, "\n".join(output)))
         raise e
 
 def ffprobe_run(pts_in):
@@ -159,9 +162,13 @@ def videos_analyze_thread(v):
     start_skip = 10
     end_skip = 10
 
-    length = get_media_length(v['video'])
-    resolution = ffprobe_run(['-show_entries stream=width,height', '-of csv=p=0', '-i "{}"'.format( v['video'] ) ])
-    resolution = list(map(int, resolution.split(',')))
+    try:
+        length = get_media_length(v['video'])
+        resolution = ffprobe_run(['-show_entries stream=width,height', '-of csv=p=0', '-select_streams v:0', '-i "{}"'.format( v['video'] ) ])
+        resolution = list(map(int, resolution.split(',')))
+    except BaseException as e:
+        print('Failed analyzing video: {}'.format(v['video']))
+        raise e
 
     ret = {
         'full_length': length,
@@ -175,7 +182,7 @@ def videos_analyze_thread(v):
         
     return ret
     
-def clips_get(videos, beats, fps):
+def clips_get(videos, beats, fps, volume):
     frame_time = 1 / fps
     video_index = 0
     beat_clips = []
@@ -256,7 +263,8 @@ def clips_get(videos, beats, fps):
             'clip_end': clip_end,
             
             'frame': framenr,
-            'framecount': missing_frames
+            'framecount': missing_frames,
+            'volume': volume
         }
 
         beat_clips.append(clip)
@@ -400,8 +408,18 @@ def clips_generate_batched_thread(myargs, shared_vars):
             ]
 
         cmd_out += [
-            '-map {}:v:0'.format(i),
             '-vf "{}"'.format(','.join(filters)),
+            '-map {}:v:0'.format(i)
+        ]
+
+        if c['volume'] > 0:
+            cmd_out += [
+                '-map {}:a:0'.format(i),
+                '-c:a aac',
+                '-b:a 192k'
+            ]
+
+        cmd_out += [
             '-frames {}'.format(c['framecount']),
             '-t {}'.format(c['duration']+0.5)
         ]
@@ -438,7 +456,7 @@ def clips_generate_batched_thread(myargs, shared_vars):
     return myargs
 
 
-def clips_merge(output, audio, vids_file, expected_length):
+def clips_merge(output, audio, vids_file, expected_length, volume):
     cmd_in = [
         '-f concat',
         '-i "{}"'.format(vids_file)
@@ -447,17 +465,21 @@ def clips_merge(output, audio, vids_file, expected_length):
     if audio:
         cmd_in.append('-i "{}"'.format(audio))
 
-    cmd_out = [
-        '-c copy',
-        '-map 0:v:0'
-    ]
+    filters = []
+    cmd_out = ['-map 0:v:0']
 
-    if audio:
+    if volume > 0 and audio:
+        filters.append('[0:a:0][1:a:0]amerge=inputs=2[a]')
+        cmd_out.append('-map [a]')
+    elif audio:
         cmd_out.append('-map 1:a:0')
+
+    
+    # cmd_out.append('-c copy')
 
     cmd_out.append('"{}"'.format(output))
 
-    ffmpeg_run(cmd_in, None, cmd_out, expected_length=expected_length, description="Merging clips together", block=True)
+    ffmpeg_run(cmd_in, filters, cmd_out, expected_length=expected_length, description="Merging clips together", block=True)
 
 def timestamp(seconds):
     minutes = seconds // 60
@@ -502,10 +524,10 @@ def apply_beat_sounds(beats, input, beat_sound='beat', input_length=None, bar_po
         
         video_audio_b[pos:pos + len(beat_sound_b)] = merged_sample
    
-    temp_name = util.get_tmp_file('ogg')
+    temp_name = util.get_tmp_file('mp4a')
 
     video_audio = video_audio_s._spawn(video_audio_b)
-    file_handle = video_audio.export(temp_name, format="ogg")
+    file_handle = video_audio.export(temp_name, format="adts")
     return temp_name
 
 def apply_circles(beats, video, keep_audio, output, expected_length = 0, bar_pos=None):
