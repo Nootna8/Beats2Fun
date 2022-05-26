@@ -31,7 +31,10 @@ def find_beats(input, option=None, song_required=False):
     
     return False
 
-max_speed = 530
+def find_beatinput(beatinput, song_required):
+    parser = parsers.parsesm.SMParser(beatinput)
+    return parser
+    
 
 def beat_density(beats, width=100, length=None):
     values = [0 for i in range(width)]

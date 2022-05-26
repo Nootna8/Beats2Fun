@@ -7,8 +7,57 @@ import simfile.notes
 import os
 from glob import glob
 import fnmatch
+from . import BeatInput, BeatOption, BeatList
 
 file_desc = 'StepMania simfile (*.sm, *.ssc)|*.sm;*.ssc"'
+
+class SMBeatOption(BeatOption):
+    chart = None
+    simfile = None
+
+    def __init__(self, simfile, chart):
+        super().__init__(chart.meter, chart.difficulty)
+        self.simfile = simfile
+        self.chart = chart
+
+    def load(self):
+        beat_times = []
+
+        note_data = NoteData(self.chart)
+        timing_data = TimingData(self.simfile, self.chart)
+        for timed_note in time_notes(note_data, timing_data):
+            if timed_note.note.note_type != simfile.notes.NoteType.TAP:
+                continue
+            note_time = float(timed_note.time)
+            if note_time in beat_times:
+                continue
+            beat_times.append(note_time)
+            
+        self.beat_list = BeatList(beat_times)
+
+class SMParser(BeatInput):
+    file_desc = file_desc
+    extensions = ['.sm', '.ssc']
+
+    def find_song(self, path):
+        if self.song:
+            return self.song
+
+        file_base = os.path.dirname(path)
+        files = os.listdir(file_base)
+        songsearch = fnmatch.filter(files, '*.mp3') + fnmatch.filter(files, '*.ogg')
+        if len(songsearch) == 0:
+            raise Exception("Song not found for: {}".format(simfile))
+        
+        return file_base + '/' + songsearch[0]
+
+    def read_file(self, path):
+        super().read_file(path)
+        mysim = simfile.open(path)
+
+        for c in mysim.charts:
+            self.options.append(SMBeatOption(mysim, c))
+
 
 def get_beats(smfile, option=None):
     mysim = simfile.open(smfile)
@@ -96,3 +145,7 @@ def find_options(input):
     ret.sort(key=lambda x: x['level'], reverse=False)
 
     return ret
+
+if __name__ == "__main__":
+    reader = SMParser("E:\\Songs\\Hardbass Madness 2\\A Girl From the Internet")
+    print(reader.song)

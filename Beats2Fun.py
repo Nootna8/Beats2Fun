@@ -1,3 +1,5 @@
+from classes import VideoPool
+from parsers import BeatInput, BeatList, BeatOption
 import util
 util.init_app_mode()
 
@@ -14,15 +16,161 @@ import subprocess
 from subprocess import Popen, PIPE, STDOUT
 import tempfile
 import time
+
+from classes import *
 import videoutil
 import beatutil
 import parsers.parsefs
 import parsers.parsetxt
 
-def write_beatfiles(beats, output_name, song_lenth):
-    parsers.parsetxt.write_beats(beats, output_name)
-    parsers.parsefs.write_beats(beats, output_name)
-    beatutil.plot_beats(beats, output_name, song_lenth)
+class VideoOutput:
+    def __init__(self):
+        pass
+
+class Beats2FunTask:
+    tasks = []
+    output_name = None
+    last_output: str
+    next_output: str
+    
+    beat_input: BeatInput
+    beat_option: BeatOption
+    filtered_beats: BeatList
+
+    length: float
+    video_output = VideoOutput()
+    vctx: VideoContext
+
+    def __init__(self, **kwargs):
+        for k,v in kwargs.items():
+            setattr(self, k, v)
+
+        self.vctx = VideoContext(
+            self.fps,
+            self.resolution,
+            self.volume,
+            self.bitrate,
+            self.threads
+        )
+
+        self.tasks.append(self.task_load_beat_input)
+        self.tasks.append(self.task_load_videos)
+        self.tasks.append(self.task_generate_clips)
+
+        if self.volume == 0:
+            self.tasks.append(self.task_set_last)
+
+        if self.beatbar:
+            self.tasks.append(self.task_add_beatbar)
+        else:
+            self.tasks.append(self.task_merge_clips)
+        
+        if self.volume > 0:
+            self.tasks.append(self.task_set_last)
+            self.tasks.append(self.task_add_song)
+
+        self.tasks.append(self.task_generate_beat_files)
+
+    def run(self):
+        self.output_task = False
+        for t in self.tasks:
+            t()
+
+    def task_set_last(self):
+        self.output_task = True
+
+    def task_load_beat_input(self):
+        self.beat_input = beatutil.find_beatinput(self.beatinput, song_required=True)
+        self.beat_option = self.beat_input.get_option(self.level)
+        self.beat_option.load()
+        self.length = videoutil.get_media_length(self.beat_input.song)
+        self.filtered_beats = self.beat_option.beat_list.reduce_beats(self.clip_dist).start_end(self.length)
+
+        self.output_name = os.path.splitext(os.path.basename(self.beat_input.song))[0]
+
+    def task_load_videos(self):
+        self.video_pool = VideoPool(self.vid_folder)
+        found = self.video_pool.find_videos(self.recurse, self.vctx, self.num_vids)
+        print("Found {} videos".format(found))
+        self.video_pool.assign_clips(self.filtered_beats, self.vctx)
+
+    def task_generate_clips(self):
+        self.last_output = self.video_pool.generate_clips(self.batch, self.vctx)
+
+    def get_next_output(self):
+        if self.output_task:
+            return self.output_folder + "/" + self.output_name + ".mp4"
+        else:
+            return util.get_tmp_file("mp4")
+
+    def task_merge_clips(self):
+        self.next_output = self.get_next_output()
+        if self.volume == 0:
+
+            videoutil.ffmpeg_run([
+                '-f concat',
+                '-i "{}"'.format(self.last_output),
+                '-i "{}"'.format(self.beat_input.song)
+            ], None, [
+                '-map 0:v',
+                '-map 1:a',
+                '-c:a aac',
+                '-c:v h264_nvenc',
+                '"{}"'.format(self.next_output)
+            ], expected_length=self.length, description="Merging clips")
+
+        else:
+            videoutil.ffmpeg_run([
+                '-f concat',
+                '-i "{}"'.format(self.last_output),
+            ], None, [
+                '-map 0:v',
+                '-map 0:a',
+                '-c:a copy',
+                '-c:v h264_nvenc',
+                '"{}"'.format(self.next_output)
+            ], expected_length=self.length, description="Merging clips")
+
+        self.last_output = self.next_output
+
+    def task_add_song(self):
+        self.next_output = self.get_next_output()
+
+        videoutil.ffmpeg_run([
+            '-i "{}"'.format(self.last_output),
+            '-i "{}"'.format(self.beat_input.song)
+        ], ["[0:a][1:a]amix=inputs=2[ma]"], [
+            '-map 0:v',
+            '-map ma',
+            '-c:a aac',
+            '-c:v copy',
+            '"{}"'.format(self.next_output)
+        ], expected_length=self.length, description="Adding music")
+
+        self.last_output = self.next_output
+
+    def task_add_beatbar(self):
+        vid_file_1 = util.get_tmp_file('mp4')
+        vid_file_2 = util.get_tmp_file('mp4')
+
+        videoutil.clips_merge(vid_file_1, None, videos_file, song_lenth, volume)
+
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            video_future = executor.submit(videoutil.apply_circles, self.all_beats, vid_file_1, False, vid_file_2, bar_pos=1)
+            audio_future = executor.submit(videoutil.apply_beat_sounds, self.all_beats, song, bar_pos=0)
+
+            video_result = video_future.result()
+            audio_result = audio_future.result()
+
+            if not video_result or not audio_result:
+                return False
+        pass
+
+    def task_generate_beat_files(self):
+        parsers.parsetxt.TXTParser.write_file(self.beat_option, self.output_folder + "/" + self.output_name)
+        parsers.parsefs.FSParser.write_file(self.beat_option, self.output_folder + "/" + self.output_name)
+        # beatutil.plot_beats(self.all_beats, self.output_folder + self.output_name, self.length)
+    
     
 def process_beats(beats, song_length, clip_dist):
     if beats[0] == 0:
@@ -46,7 +194,7 @@ def process_beats(beats, song_length, clip_dist):
 def detect_input(input):
     return beatutil.find_beats(input, song_required=True)
     
-def make_pmv(beatinput, vid_folder, fps, recurse, clip_dist, num_vids, beatbar, output_folder, resolution, bitrate, batch, threads, cuda, volume):
+def make_pmv(beatinput, vid_folder, fps, recurse, clip_dist, num_vids, beatbar, output_folder, resolution, bitrate, batch, threads, cuda, volume, pre_seek):
     with util.UHalo(text="Checking input") as h:
         detected_input = detect_input(beatinput)
         if not detected_input:
@@ -79,7 +227,7 @@ def make_pmv(beatinput, vid_folder, fps, recurse, clip_dist, num_vids, beatbar, 
         print('Getting clips failed')
         return False
 
-    videos_file = videoutil.clips_generate_batched(clips, fps, resolution, bitrate=bitrate, num_threads=threads, batch_size=batch, cuda=cuda)
+    videos_file = videoutil.clips_generate_batched(clips, fps, resolution, bitrate=bitrate, num_threads=threads, batch_size=batch, cuda=cuda, pre_seek=pre_seek)
     if not videos_file:
         print('Generating clips failed')
         return False
@@ -88,7 +236,7 @@ def make_pmv(beatinput, vid_folder, fps, recurse, clip_dist, num_vids, beatbar, 
         vid_file_1 = util.get_tmp_file('mp4')
         vid_file_2 = util.get_tmp_file('mp4')
 
-        videoutil.clips_merge(vid_file_1, None, videos_file, song_lenth)
+        videoutil.clips_merge(vid_file_1, None, videos_file, song_lenth, volume)
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
             video_future = executor.submit(videoutil.apply_circles, all_beat_times, vid_file_1, False, vid_file_2, bar_pos=1)
@@ -132,7 +280,7 @@ def main():
     
     parser.add_argument(
         'beatinput',
-        help='Path to input (Chart folder / file / music file)',
+        help='Path to input, chart folder / file / music file',
         widget='FileChooser',
         metavar="Input",
         gooey_options={
@@ -143,7 +291,7 @@ def main():
 
     parser.add_argument(
         'vid_folder',
-        help='Folder containg your input videos (.mp4, .wmv, ...). Use multiple folder by splitting them with folder1;folder2;folder3',
+        help='Folder containg your input videos, .mp4, .wmv, .... Use multiple folder by splitting them with folder1;folder2;folder3',
         widget='DirChooser',
         metavar="Video folder",
         gooey_options={
@@ -162,21 +310,24 @@ def main():
         }
     )
 
-    parser.add_argument('-num_vids',    metavar="Video amount",     default=0, help='How many videos to randomly select from the Video folder, 0=all)', type=int, widget='IntegerField')
+    parser.add_argument('-num_vids',    metavar="Video amount",     default=0, help='How many videos to randomly select from the Video folder, 0=all', type=int, widget='IntegerField')
     parser.add_argument('-recurse',     metavar="Search resursive", help='Search videos recursively', action='store_true')
     parser.add_argument('-beatbar',     metavar="Beatbar",          help='Add a beatbar to the output video', action='store_true')
     parser.add_argument('-clip_dist',   metavar="Clip distance",    default=0.4, help='Minimal clip distance in seconds', type=float, widget='DecimalField')
-    parser.add_argument('-volume',      metavar="Clip volume",      default=0.0, help='Keep the original clip audio, 0.1=10%)', type=float, widget='DecimalField')
+    parser.add_argument('-volume',      metavar="Clip volume",      default=0.0, help='Keep the original clip audio', type=float, widget='DecimalField')
+    parser.add_argument('-level',       metavar="Chart level",      default='min', help='What difficilty to pick from the chart, min/max/LEVEL', type=str)
 
     quality_group = parser.add_argument_group("Quality Options")   
     quality_group.add_argument('-fps',         metavar="FPS",              default=25, help='Output video FPS', type=int, widget='IntegerField')
     quality_group.add_argument('-resolution',  metavar="Resolution",       default='1280:720', help='Output video Resolution')
-    quality_group.add_argument('-bitrate',     metavar="Bit rate",         default='3M', help='Output video bitrate (Higher numer is higher quality)')
+    quality_group.add_argument('-bitrate',     metavar="Bit rate",         default='3M', help='Output video bitrate, higher numer is higher quality')
     
-    performance_group = parser.add_argument_group("Performance Options")   
+    performance_group = parser.add_argument_group("Performance Options")
     performance_group.add_argument('-batch',       metavar="Batch size",       default=10, type=int, help='How many clips to split per thread')
     performance_group.add_argument('-threads',     metavar="Thread count",     default=4, type=int, help='How many threads to use while generating')
     performance_group.add_argument('-cuda',        metavar="GPU Acceleration", help='Use Nvidia GPU Acceleration', action='store_true')
+    performance_group.add_argument('-pre_seek',    metavar="Seek buffer", default=0,   help='Use when clips start forzen', type=int)
+    performance_group.add_argument('-debug',       metavar="Debug", help='Show debug messages', action='store_true')
 
     
     if util.app_mode == 'pre_goo':
@@ -196,16 +347,37 @@ def main():
         print("Unusable resolution: {}".format(args.resolution))
         sys.exit(1)
     
-    with tempfile.TemporaryDirectory() as tmpdir:
-        util.current_tmp_dir = tmpdir
-        start_time = time.time()
-        result = make_pmv(**vars(args))
-        if util.app_mode != 'goo':
-            print('Generation took: {}'.format(videoutil.timestamp(time.time() - start_time)))
-        print('Cleanup ...')
-    
-    if not result:
+    #with tempfile.TemporaryDirectory() as tmpdir:
+    util.current_tmp_dir = 'tmp'
+    start_time = time.time()
+    # result = make_pmv(**vars(args))
+
+    if args.debug:
+        util.debug_flag = True
+
+    runner = Beats2FunTask(**vars(args))
+
+    try:
+        runner.run()
+    except BaseException as e:
+        if util.debug_flag:
+            raise e
+        else:
+            print("An error occured: {}".format(str(e)))
         sys.exit(1)
+
+    print(runner.last_output + " is done")
+    try:
+        notification.notify(
+            title = "Beats2Fun",
+            message = runner.last_output + " is done",
+            timeout = 5)
+    except:
+        pass
+
+    if util.app_mode != 'goo':
+        print('Generation took: {}'.format(videoutil.timestamp(time.time() - start_time)))
+    print('Cleanup ...')
     
 if __name__ == "__main__":
     main()

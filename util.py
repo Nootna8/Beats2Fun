@@ -1,3 +1,4 @@
+from distutils.log import debug
 import tempfile
 import os
 import sys
@@ -15,6 +16,8 @@ import tqdm.utils
 current_tmp_dir = False
 global app_mode
 app_mode = None
+global debug_flag
+debug_flag = False
 
 def get_tmp_file(ext):
     if not current_tmp_dir:
@@ -131,6 +134,11 @@ def handle_tqdm_out():
         tout.truncate(0)
         if len(text) > 2:
             print(text)
+
+def batch(iterable, n=1):
+    l = len(iterable)
+    for ndx in range(0, l, n):
+        yield iterable[ndx:min(ndx + n, l)]
 
 def clamp(n, smallest, largest): 
     return max(smallest, min(n, largest))

@@ -7,6 +7,7 @@ import datetime
 import os
 import sys
 from glob import glob
+import fnmatch
 import math
 import random
 from turtle import position
@@ -37,6 +38,9 @@ def ffmpeg_run(pts_in, filters, pts_out, silent = True, expected_length = 0, des
     cmd = ' '.join(cmd_pts)
     retcode = -1
     output = []
+
+    # if util.debug_flag:
+        # print(cmd)
 
     try:
         error_msg = None
@@ -117,10 +121,28 @@ def videos_get(vid_folder, vids_deep, num_vids, num_threads=4):
     videos = []
 
     for vf in vid_folder.split(';'):
-        for ext in video_formats:
-            videos += glob(vf + "/*" + ext)
-            if vids_deep:
-                videos += glob(vf + "/**/*" + ext, recursive=True)
+        if vids_deep:
+            for root, dirs, files in os.walk(vf):
+                for f in files:
+                    for ext in video_formats:
+                        if f.endswith(ext):
+                            videos.append(vf + '/' + f)
+        else:
+            for f in os.listdir(vf):
+                for ext in video_formats:
+                    if f.endswith(ext):
+                        videos.append(vf + '/' + f)
+        
+
+        
+
+        #for ext in video_formats:
+        #    matches = list(fnmatch.filter(files, '*' + ext))
+        #    for m in matches:
+        #        videos.append(vf + '/' + m)
+            #videos += glob(vf + "/*" + ext)
+            #if vids_deep:
+            #    videos += glob(vf + "/**/*" + ext, recursive=True)
         
     if num_vids > 0:
         random.shuffle(videos)
@@ -145,7 +167,8 @@ def videos_get(vid_folder, vids_deep, num_vids, num_threads=4):
             for future in futures:
                 try:
                     r = future.result()
-                    video_states.append(r)
+                    if r:
+                        video_states.append(r)
                 except BaseException as e:
                     for f in futures:
                         f.cancel()
@@ -163,9 +186,17 @@ def videos_analyze_thread(v):
     end_skip = 10
 
     try:
-        length = get_media_length(v['video'])
-        resolution = ffprobe_run(['-show_entries stream=width,height', '-of csv=p=0', '-select_streams v:0', '-i "{}"'.format( v['video'] ) ])
-        resolution = list(map(int, resolution.split(',')))
+        result = ffprobe_run([
+            '-select_streams v',
+            '-show_entries format=duration',
+            '-show_entries stream=width,height',
+            '-of csv="p=0"',
+            '-i "{}"'.format(v['video'])
+        ]).split("\n")
+        resolution = list(map(int, result[0].strip().split(',')))
+        length = float(result[1].strip())
+        
+        
     except BaseException as e:
         print('Failed analyzing video: {}'.format(v['video']))
         raise e
@@ -282,7 +313,7 @@ def batch(iterable, n=1):
     for ndx in range(0, l, n):
         yield iterable[ndx:min(ndx + n, l)]
 
-def clips_generate_batched(beat_clips, fps, resolution, bitrate='3M', batch_size=10, num_threads=4, cuda=False):
+def clips_generate_batched(beat_clips, fps, resolution, bitrate='3M', batch_size=10, num_threads=4, cuda=False, pre_seek=0):
     videos_file_name = util.get_tmp_file('txt')
     videos_file = open(videos_file_name, 'w')
     
@@ -311,7 +342,8 @@ def clips_generate_batched(beat_clips, fps, resolution, bitrate='3M', batch_size
                 'fps': fps,
                 'resolution': resolution,
                 'bitrate': bitrate,
-                'cuda': cuda
+                'cuda': cuda,
+                'pre_seek': pre_seek
             })
 
     videos_file.close()
@@ -362,7 +394,6 @@ def clips_generate_batched_thread(myargs, shared_vars):
     cuda_dec = myargs['cuda']
     cuda_enc = myargs['cuda']
 
-
     if cuda_enc and shared_vars['cuda_sessions'] >= 3:
         cuda_enc = False
     if cuda_dec and myargs['clips'][0]['video_state']['width'] > 4096:
@@ -381,9 +412,13 @@ def clips_generate_batched_thread(myargs, shared_vars):
 
     for i,c in enumerate(myargs['clips']):
         cmd_in += [
-            '-ss {}'.format(timestamp(c['clip_start'])),
+            '-ss {}'.format(timestamp(max(0, c['clip_start'] - myargs['pre_seek']))),
+            '-t {}'.format(c['duration'] + myargs['pre_seek'] + 0.5),
             '-i "{}"'.format(myargs['video']),
         ]
+
+        if myargs['pre_seek']:
+            cmd_in.append('-ss {}'.format(timestamp(myargs['pre_seek'])))
 
         filters = [
             'fps={}'.format(myargs['fps'])
@@ -404,25 +439,24 @@ def clips_generate_batched_thread(myargs, shared_vars):
         else:
             filters += [
                 'scale={}:force_original_aspect_ratio=1'.format(myargs['resolution']),
-                #'pad={}:(ow-iw)/2:(oh-ih)/2'.format(myargs['resolution'])
+                'pad={}:(ow-iw)/2:(oh-ih)/2'.format(myargs['resolution'])
             ]
 
         cmd_out += [
             '-vf "{}"'.format(','.join(filters)),
-            '-map {}:v:0'.format(i)
+            '-map {}:v'.format(i),
+            '-vframes {}'.format(c['framecount']),
+            #'-vsync cfr',
+            #'-video_track_timescale 60000'
         ]
 
         if c['volume'] > 0:
             cmd_out += [
-                '-map {}:a:0'.format(i),
+                '-af atrim=duration={}'.format((1/myargs['fps'])*c['framecount']),
+                '-map {}:a'.format(i),
                 '-c:a aac',
                 '-b:a 192k'
             ]
-
-        cmd_out += [
-            '-frames {}'.format(c['framecount']),
-            '-t {}'.format(c['duration']+0.5)
-        ]
 
         if cuda_enc:
             cmd_out.append('-c:v h264_nvenc')
@@ -456,7 +490,7 @@ def clips_generate_batched_thread(myargs, shared_vars):
     return myargs
 
 
-def clips_merge(output, audio, vids_file, expected_length, volume):
+def clips_merge(output, audio, vids_file, expected_length):
     cmd_in = [
         '-f concat',
         '-i "{}"'.format(vids_file)
@@ -466,17 +500,15 @@ def clips_merge(output, audio, vids_file, expected_length, volume):
         cmd_in.append('-i "{}"'.format(audio))
 
     filters = []
-    cmd_out = ['-map 0:v:0']
-
-    if volume > 0 and audio:
-        filters.append('[0:a:0][1:a:0]amerge=inputs=2[a]')
-        cmd_out.append('-map [a]')
-    elif audio:
-        cmd_out.append('-map 1:a:0')
-
+    cmd_out = ['-map 0:v']
     
-    # cmd_out.append('-c copy')
+    if audio:
+        cmd_out.append('-map 1:a')
+        cmd_out.append('-c:a aac')
 
+    # cmd_out.append('-c copy')
+    cmd_out.append('-c:v h264_nvenc')
+    
     cmd_out.append('"{}"'.format(output))
 
     ffmpeg_run(cmd_in, filters, cmd_out, expected_length=expected_length, description="Merging clips together", block=True)
