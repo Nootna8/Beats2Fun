@@ -31,6 +31,7 @@ class Beats2FunTask:
     tasks = []
     output_name = None
     last_output: str
+    last_audio: str
     next_output: str
     
     beat_input: BeatInput
@@ -40,6 +41,9 @@ class Beats2FunTask:
     length: float
     video_output = VideoOutput()
     vctx: VideoContext
+
+    def add_task(self, task, last=False):
+        self.tasks.append({'task': task, 'last': last})
 
     def __init__(self, **kwargs):
         for k,v in kwargs.items():
@@ -53,31 +57,23 @@ class Beats2FunTask:
             self.threads
         )
 
-        self.tasks.append(self.task_load_beat_input)
-        self.tasks.append(self.task_load_videos)
-        self.tasks.append(self.task_generate_clips)
-
-        if self.volume == 0:
-            self.tasks.append(self.task_set_last)
+        self.add_task(self.task_load_beat_input)
+        self.add_task(self.task_load_videos)
+        self.add_task(self.task_generate_clips)
+        self.add_task(self.task_merge_clips, self.volume == 0 and not self.beatbar)
+        if self.volume > 0:
+            self.add_task(self.task_add_song, not self.beatbar)
 
         if self.beatbar:
-            self.tasks.append(self.task_add_beatbar)
-        else:
-            self.tasks.append(self.task_merge_clips)
-        
-        if self.volume > 0:
-            self.tasks.append(self.task_set_last)
-            self.tasks.append(self.task_add_song)
+            self.add_task(self.task_add_beatbar, True)
 
-        self.tasks.append(self.task_generate_beat_files)
+        self.add_task(self.task_generate_beat_files)
 
     def run(self):
         self.output_task = False
         for t in self.tasks:
-            t()
-
-    def task_set_last(self):
-        self.output_task = True
+            self.output_task = t["last"]
+            t["task"]()
 
     def task_load_beat_input(self):
         self.beat_input = beatutil.find_beatinput(self.beatinput, song_required=True)
@@ -126,7 +122,7 @@ class Beats2FunTask:
             ], None, [
                 '-map 0:v',
                 '-map 0:a',
-                '-c:a copy',
+                '-c:a aac',
                 '-c:v h264_nvenc',
                 '"{}"'.format(self.next_output)
             ], expected_length=self.length, description="Merging clips")
@@ -139,7 +135,7 @@ class Beats2FunTask:
         videoutil.ffmpeg_run([
             '-i "{}"'.format(self.last_output),
             '-i "{}"'.format(self.beat_input.song)
-        ], ["[0:a][1:a]amix=inputs=2[ma]"], [
+        ], ["[0:a][1:a]amix=inputs=2:weights={} 1[ma]".format(self.volume)], [
             '-map 0:v',
             '-map ma',
             '-c:a aac',
@@ -150,21 +146,32 @@ class Beats2FunTask:
         self.last_output = self.next_output
 
     def task_add_beatbar(self):
-        vid_file_1 = util.get_tmp_file('mp4')
-        vid_file_2 = util.get_tmp_file('mp4')
-
-        videoutil.clips_merge(vid_file_1, None, videos_file, song_lenth, volume)
+        self.next_output = self.get_next_output()
+        tmp_vid = util.get_tmp_file('mp4')
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            video_future = executor.submit(videoutil.apply_circles, self.all_beats, vid_file_1, False, vid_file_2, bar_pos=1)
-            audio_future = executor.submit(videoutil.apply_beat_sounds, self.all_beats, song, bar_pos=0)
+
+            video_future = executor.submit(videoutil.apply_circles, self.beat_option.beat_list.beats, self.last_output, False, tmp_vid, bar_pos=1)
+            audio_future = executor.submit(videoutil.apply_beat_sounds, self.beat_option.beat_list.beats, self.beat_input.song, bar_pos=0, beat_sound=self.beatbar_sound, beat_volume=self.beatbar_volume)
 
             video_result = video_future.result()
             audio_result = audio_future.result()
 
             if not video_result or not audio_result:
-                return False
-        pass
+                raise Exception("Adding beatbar failed")
+
+        videoutil.ffmpeg_run([
+            '-i "{}"'.format(tmp_vid),
+            '-i "{}"'.format(audio_result)
+        ], [], [
+            '-map 0:v',
+            '-map 1:a',
+            '-c:a copy',
+            '-c:v copy',
+            '"{}"'.format(self.next_output)
+        ], expected_length=self.length, description="Merging beat video and beat audio")
+
+        self.last_output = self.next_output
 
     def task_generate_beat_files(self):
         parsers.parsetxt.TXTParser.write_file(self.beat_option, self.output_folder + "/" + self.output_name)
@@ -312,10 +319,14 @@ def main():
 
     parser.add_argument('-num_vids',    metavar="Video amount",     default=0, help='How many videos to randomly select from the Video folder, 0=all', type=int, widget='IntegerField')
     parser.add_argument('-recurse',     metavar="Search resursive", help='Search videos recursively', action='store_true')
-    parser.add_argument('-beatbar',     metavar="Beatbar",          help='Add a beatbar to the output video', action='store_true')
     parser.add_argument('-clip_dist',   metavar="Clip distance",    default=0.4, help='Minimal clip distance in seconds', type=float, widget='DecimalField')
     parser.add_argument('-volume',      metavar="Clip volume",      default=0.0, help='Keep the original clip audio', type=float, widget='DecimalField')
     parser.add_argument('-level',       metavar="Chart level",      default='min', help='What difficilty to pick from the chart, min/max/LEVEL', type=str)
+
+    beatbar_group = parser.add_argument_group("BeatBar Options")
+    parser.add_argument('-beatbar',         metavar="Beatbar",          help='Add a beatbar to the output video', action='store_true')
+    parser.add_argument('-beatbar_sound',   metavar="Beatbar sound",    help='What sound effect to use (none to disable)', default='beat')
+    parser.add_argument('-beatbar_volume',  metavar="Beatbar volume",   help='Beat sound volume multiplier (db)', default=0, type=float)
 
     quality_group = parser.add_argument_group("Quality Options")   
     quality_group.add_argument('-fps',         metavar="FPS",              default=25, help='Output video FPS', type=int, widget='IntegerField')

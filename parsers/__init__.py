@@ -99,12 +99,26 @@ class BeatInput:
         if os.path.isfile(path):
             self.read_file(path)
 
+    @classmethod
+    def supports_input(cls, path):
+        if not os.path.exists(path):
+            return False
+
+        if os.path.isfile(path):
+            filename, ext = os.path.splitext(path)
+            return ext in cls.extensions
+        
+        files = os.listdir(path)
+        for f in files:
+            filename, ext = os.path.splitext(f)
+            if ext in cls.extensions:
+                return True
+
+        return False
+
     @staticmethod
     def write_file(option, path):
         raise Exception("Not implemented")
-
-    def find_song(self, path):
-        return None
 
     def get_option(self, level=None):
         if level in ['min', 'max']:
@@ -112,7 +126,7 @@ class BeatInput:
             if level == 'max':
                 return self.options[-1]
             if level == 'min':
-                return self.options[1]
+                return self.options[0]
 
 
         for o in self.options:
@@ -133,4 +147,3 @@ class BeatInput:
         filename, ext = os.path.splitext(path)
         if ext not in self.extensions:
             raise Exception("{} not supported for beat reading".format(path))
-        self.song = self.find_song(path)

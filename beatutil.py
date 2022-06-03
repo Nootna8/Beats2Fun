@@ -32,8 +32,13 @@ def find_beats(input, option=None, song_required=False):
     return False
 
 def find_beatinput(beatinput, song_required):
-    parser = parsers.parsesm.SMParser(beatinput)
-    return parser
+    if parsers.parsesm.SMParser.supports_input(beatinput):
+        return parsers.parsesm.SMParser(beatinput)
+
+    if parsers.parseosu.OSUParser.supports_input(beatinput):
+        return parsers.parseosu.OSUParser(beatinput)
+
+    return False
     
 
 def beat_density(beats, width=100, length=None):

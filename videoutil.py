@@ -525,7 +525,7 @@ def from_timestamp(timestamp):
     a_timedelta = date_time - datetime.datetime(1900, 1, 1)
     return a_timedelta.total_seconds()
 
-def apply_beat_sounds(beats, input, beat_sound='beat', input_length=None, bar_pos=None):
+def apply_beat_sounds(beats, input, beat_sound='beat', input_length=None, bar_pos=None, beat_volume=0):
     filename, ext = os.path.splitext(input)
 
     if ext in video_formats:
@@ -537,14 +537,14 @@ def apply_beat_sounds(beats, input, beat_sound='beat', input_length=None, bar_po
     if '.' not in beat_sound:
         beat_sound = 'Resources/{}.mp3'.format(beat_sound)
     
-    beat_sound_0 = AudioSegment.from_file(beat_sound)
+    beat_sound_0 = AudioSegment.from_file(beat_sound) + beat_volume
     
     video_audio_s, beat_sound_s = AudioSegment._sync(video_audio_0, beat_sound_0)
     video_audio_b = bytearray(video_audio_s._data)
     beat_sound_b = beat_sound_s._data
     
     for i,b in enumerate(util.Utqdm(beats[:-1], desc="Overlaying beat sounds", position=bar_pos)):
-        pos = len(video_audio_s[:b * 1000]._data)
+        pos = len(video_audio_s[:b.start * 1000]._data)
         
         video_sample = video_audio_b[pos:pos + len(beat_sound_b)]
         
@@ -580,7 +580,7 @@ def apply_circles(beats, video, keep_audio, output, expected_length = 0, bar_pos
     
     circle_index = 0
     for i,b in enumerate(beats):
-        beat_circles[circle_index]['beats'].append(b)
+        beat_circles[circle_index]['beats'].append(b.start)
         
         circle_index += 1
         if circle_index >= num_beats:

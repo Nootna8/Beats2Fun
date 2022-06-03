@@ -1,5 +1,6 @@
 import os
 import random
+import json
 from concurrent.futures import ThreadPoolExecutor
 from parsers import Beat
 
@@ -35,17 +36,20 @@ class LoadedVideo:
 
     def __init__(self, file):
         self.file = file
-        result = videoutil.ffprobe_run([
+        result = json.loads(videoutil.ffprobe_run([
             '-select_streams v',
             '-show_entries format=duration',
             '-show_entries stream=width,height',
-            '-of csv="p=0"',
+            '-print_format json',
             '-i "{}"'.format(self.file)
-        ]).split("\n")
-        resolution = list(map(int, result[0].strip().split(',')))
-        self.width = resolution[0]
-        self.height = resolution[1]
-        self.length = float(result[1].strip())
+        ]))
+
+        #if not result or "streams" not in result or len(result["streams"]) == 0 or "format" not in result :
+        #    raise Exception("(Video {} might be corrupt) Failed to get video length".format(file))
+        
+        self.width = result["streams"][0]["width"]
+        self.height = result["streams"][0]["height"]
+        self.length = float(result["format"]["duration"])
         trim_length = 10
         self.start_at = trim_length
         self.end_at = self.length - trim_length
@@ -92,7 +96,7 @@ class VideoClip:
     def ffmpeg_options(self, vctx, subindex):
         cmd_in = [
             '-ss {}'.format(videoutil.timestamp(max(0, self.start))),
-            '-t {}'.format(self.beat.duration + 0.3),
+            '-t {}'.format(self.beat.duration + 0.5),
             '-i "{}"'.format(self.video.file),
         ]
         filters = ['fps={}'.format(vctx.fps)]
@@ -133,16 +137,19 @@ class VideoClip:
         if not os.path.exists(self.clip_file):
             raise Exception('Clip "{}" was not created'.format(self.clip_file))
         
-        framecount = int(videoutil.ffprobe_run([
-            '-select_streams v:0',
-            '-count_packets',
-            '-show_entries stream=nb_read_packets',
-            '-of csv=p=0',
-            '-i {}'.format(self.clip_file)]
-        ))
+        try:
+            framecount = int(videoutil.ffprobe_run([
+                '-select_streams v:0',
+                '-count_packets',
+                '-show_entries stream=nb_read_packets',
+                '-of csv=p=0',
+                '-i {}'.format(self.clip_file)]
+            ))
+        except Exception as e:
+            raise Exception("(Clip check error {} might be corrupt, try again) {}".format(self.video.file, str(e))) from e
 
         if framecount != self.framecount:
-            raise Exception("(Video {} might be corrupt) {} has {} frames instead of the requested {}".format(self.video.file, self.clip_file, framecount, self.framecount))
+            raise Exception("(Clip check error {} might be corrupt, try again) {} has {} frames instead of the requested {}".format(self.video.file, self.clip_file, framecount, self.framecount))
 
 class VideoPool:
     folders = []
@@ -281,7 +288,11 @@ class VideoPool:
             filters += clip_filters
             cmd_out += clip_out
         
-        videoutil.ffmpeg_run(cmd_in, None, cmd_out, True)
+        try:
+            videoutil.ffmpeg_run(cmd_in, None, cmd_out, True)
+        except Exception as e:
+            raise Exception("(Clipping error {} might be corrupt, try again) {}".format(self.file, str(e))) from e
+
         for c in clips:
             c.test_file()
 

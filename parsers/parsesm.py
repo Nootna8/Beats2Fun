@@ -12,8 +12,6 @@ from . import BeatInput, BeatOption, BeatList
 file_desc = 'StepMania simfile (*.sm, *.ssc)|*.sm;*.ssc"'
 
 class SMBeatOption(BeatOption):
-    chart = None
-    simfile = None
 
     def __init__(self, simfile, chart):
         super().__init__(chart.meter, chart.difficulty)
@@ -57,6 +55,8 @@ class SMParser(BeatInput):
 
         for c in mysim.charts:
             self.options.append(SMBeatOption(mysim, c))
+
+        self.song = self.find_song(path)
 
 
 def get_beats(smfile, option=None):
