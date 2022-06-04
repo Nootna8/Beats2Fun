@@ -102,7 +102,6 @@ class Beats2FunTask:
     def task_merge_clips(self):
         self.next_output = self.get_next_output()
         if self.volume == 0:
-
             videoutil.ffmpeg_run([
                 '-f concat',
                 '-i "{}"'.format(self.last_output),
@@ -120,8 +119,6 @@ class Beats2FunTask:
                 '-f concat',
                 '-i "{}"'.format(self.last_output),
             ], None, [
-                '-map 0:v',
-                '-map 0:a',
                 '-c:a aac',
                 '-c:v h264_nvenc',
                 '"{}"'.format(self.next_output)
@@ -137,7 +134,7 @@ class Beats2FunTask:
             '-i "{}"'.format(self.beat_input.song)
         ], ["[0:a][1:a]amix=inputs=2:weights={} 1[ma]".format(self.volume)], [
             '-map 0:v',
-            '-map ma',
+            '-map [ma]',
             '-c:a aac',
             '-c:v copy',
             '"{}"'.format(self.next_output)
@@ -177,102 +174,6 @@ class Beats2FunTask:
         parsers.parsetxt.TXTParser.write_file(self.beat_option, self.output_folder + "/" + self.output_name)
         parsers.parsefs.FSParser.write_file(self.beat_option, self.output_folder + "/" + self.output_name)
         # beatutil.plot_beats(self.all_beats, self.output_folder + self.output_name, self.length)
-    
-    
-def process_beats(beats, song_length, clip_dist):
-    if beats[0] == 0:
-        del beats[0]
-
-    # Push birst beat
-    beat_times = [0]
-
-    for b in beats:
-        diff = b - beat_times[-1]
-        if diff <= clip_dist:
-            continue
-
-        beat_times.append(b)  
-
-    # Push last beat
-    beat_times.append(song_length)
-    
-    return beat_times
-
-def detect_input(input):
-    return beatutil.find_beats(input, song_required=True)
-    
-def make_pmv(beatinput, vid_folder, fps, recurse, clip_dist, num_vids, beatbar, output_folder, resolution, bitrate, batch, threads, cuda, volume, pre_seek):
-    with util.UHalo(text="Checking input") as h:
-        detected_input = detect_input(beatinput)
-        if not detected_input:
-            h.fail('No usable input detected')
-            return False
-        else:
-            song = detected_input[0]
-            song_lenth = videoutil.get_media_length(song)
-            all_beat_times = detected_input[1]
-            output_name = os.path.splitext(os.path.basename(song))[0] + '-PMV'
-            output_file = os.path.realpath('{}/{}.mp4'.format(output_folder, output_name))
-            h.succeed('Input - Song: {} - Beatcount: {}, - Output: {} '.format(song, len(all_beat_times), output_file))
-
-    if not output_folder:
-        output_folder = 'out'
-    if not os.path.exists(output_folder):
-        os.mkdir(output_folder)
-    
-    with util.UHalo(text="Getting and processing beats") as h:
-        beats_reduced = process_beats(all_beat_times, song_lenth, clip_dist)
-        h.succeed()
-    
-    videos = videoutil.videos_get(vid_folder, recurse, num_vids, num_threads=threads)
-    if not videos:
-        print('Getting videos failed')
-        return False
-    
-    clips = videoutil.clips_get(videos, beats_reduced, fps, volume)
-    if not clips:
-        print('Getting clips failed')
-        return False
-
-    videos_file = videoutil.clips_generate_batched(clips, fps, resolution, bitrate=bitrate, num_threads=threads, batch_size=batch, cuda=cuda, pre_seek=pre_seek)
-    if not videos_file:
-        print('Generating clips failed')
-        return False
-
-    if beatbar:
-        vid_file_1 = util.get_tmp_file('mp4')
-        vid_file_2 = util.get_tmp_file('mp4')
-
-        videoutil.clips_merge(vid_file_1, None, videos_file, song_lenth, volume)
-
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            video_future = executor.submit(videoutil.apply_circles, all_beat_times, vid_file_1, False, vid_file_2, bar_pos=1)
-            audio_future = executor.submit(videoutil.apply_beat_sounds, all_beat_times, song, bar_pos=0)
-
-            video_result = video_future.result()
-            audio_result = audio_future.result()
-
-            if not video_result or not audio_result:
-                return False
-
-            videoutil.video_merge_audio(vid_file_2, audio_result, output_file, song_lenth)
-    else:
-        videoutil.clips_merge(output_file, song, videos_file, song_lenth, volume)
-
-    with util.UHalo(text="Witing beat files") as h:
-        write_beatfiles(all_beat_times, output_folder + '/' + output_name, song_lenth)
-        h.succeed()
-        
-    print(output_file + " is done")
-    try:
-        notification.notify(
-            title = "Beats2Fun",
-            message = output_file + " is done",
-            timeout = 5)
-    except:
-        pass
-    
-    return True
 
 @Gooey(progress_regex=r"(?P<current>\d+)/(?P<total>\d+)",
       progress_expr="current / total * 100",

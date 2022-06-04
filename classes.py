@@ -28,7 +28,8 @@ class LoadedVideo:
     file: str
     width: int
     height: int
-    length: int
+    length: float
+    audio_channels: int
     clips: list
     start_at: float
     end_at: float
@@ -36,20 +37,25 @@ class LoadedVideo:
 
     def __init__(self, file):
         self.file = file
-        result = json.loads(videoutil.ffprobe_run([
-            '-select_streams v',
+        result = videoutil.ffprobe_run([
             '-show_entries format=duration',
-            '-show_entries stream=width,height',
+            '-show_entries stream=width,height,codec_type,channels',
             '-print_format json',
             '-i "{}"'.format(self.file)
-        ]))
+        ])
+
+        result = json.loads(result)
 
         #if not result or "streams" not in result or len(result["streams"]) == 0 or "format" not in result :
         #    raise Exception("(Video {} might be corrupt) Failed to get video length".format(file))
+
+        vid_stream = [s for s in result["streams"] if s["codec_type"] == "video"][0]
+        audio_stream = [s for s in result["streams"] if s["codec_type"] == "audio"][0]
         
-        self.width = result["streams"][0]["width"]
-        self.height = result["streams"][0]["height"]
+        self.width = vid_stream["width"]
+        self.height = vid_stream["height"]
         self.length = float(result["format"]["duration"])
+        self.audio_channels = audio_stream["channels"]
         trim_length = 10
         self.start_at = trim_length
         self.end_at = self.length - trim_length
@@ -109,6 +115,7 @@ class VideoClip:
             ratio1 = res_pts[0] / res_pts[1]
             ratio2 = self.video.width / self.video.height
             if ratio1 != ratio2:
+                print("ratio", ratio1, ratio2)
                 filters.append('pad={}:(ow-iw)/2:(oh-ih)/2'.format(vctx.resolution))
 
         cmd_out += [
@@ -119,8 +126,9 @@ class VideoClip:
 
         if vctx.volume > 0:
             cmd_out += [
+                '-ac 2',
                 '-shortest',
-                '-fflags shortest',
+                # '-fflags shortest',
                 '-map {}:a'.format(subindex),
                 '-c:a aac',
                 '-b:a 192k'

@@ -39,8 +39,8 @@ def ffmpeg_run(pts_in, filters, pts_out, silent = True, expected_length = 0, des
     retcode = -1
     output = []
 
-    # if util.debug_flag:
-        # print(cmd)
+    if util.debug_flag:
+        print(cmd)
 
     try:
         error_msg = None
@@ -108,7 +108,7 @@ def ffprobe_run(pts_in):
     retcode = -1
 
     try:
-        result = subprocess.run(cmd, stdout=subprocess.PIPE)
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         retcode = result.returncode
         if retcode != 0:
             raise Exception("Invalid return code")

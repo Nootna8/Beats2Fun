@@ -1,6 +1,54 @@
 name: Beats2Build build
 on: [push]
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v2
+    
+    - uses: conda-incubator/setup-miniconda@v2
+      with:
+        auto-update-conda: true
+        python-version: 3.9
+    
+    - name: Install requirements
+      shell: bash -l {0}
+      run: |
+        conda activate test
+        conda install -c conda-forge wxpython
+        pip3 install -r requirements.txt
+        pip3 install youtube-dl
+    
+    - name: Cache testdata
+      uses: actions/cache@v3
+      id: cache-testdata
+      with:
+        key: cache-testdata
+        restore-keys: cache-testdata
+        path: .github/test/data
+    
+    - name: Preparing test data
+      if: steps.cache-testdata.outputs.cache-hit != 'true'
+      shell: bash -l {0}
+      run: |
+        cd .github/test
+        mkdir data
+        wget "https://beatconnect.io/b/1631947/Zl6h9inp/" -O "data/1631947 KUMOKIRI - Shippuujinrai.osz"
+        unzip "Stamina Alley Part 1.zip" -d data
+        youtube-dl -f 'bestvideo[height<=720]' "https://www.youtube.com/watch?v=WMweEpGlu_U" -o "data/%(title)s.%(ext)s"
+        youtube-dl -f 'bestvideo[height<=720]' "https://www.youtube.com/watch?v=Z8Z51no1TD0" -o "data/%(title)s.%(ext)s"
+        youtube-dl -f 'bestvideo[height<=720]' "https://www.youtube.com/watch?v=HbkBVxU5K5A" -o "data/%(title)s.%(ext)s"
+        youtube-dl -f 'bestvideo[height<=720]' "https://www.youtube.com/watch?v=NFXtY3PDl9o" -o "data/%(title)s.%(ext)s"
+        youtube-dl -f 'bestvideo[height<=720]' "https://www.youtube.com/watch?v=0lapF4DQPKQ" -o "data/%(title)s.%(ext)s"
+        
+    - name: Running tests
+      shell: bash -l {0}
+      run: |
+        cd ${{ github.workspace }}
+        conda activate test
+        python Beats2Fun.py ".github/test/1631947 KUMOKIRI - Shippuujinrai.osz" .github/test
+    
   build:
 
     runs-on: ubuntu-latest
