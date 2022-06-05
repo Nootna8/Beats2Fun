@@ -1,3 +1,4 @@
+from parsers import BeatInput, BeatList, BeatOption
 import util
 util.init_app_mode()
 
@@ -13,7 +14,75 @@ import videoutil
 import beatutil
 from pydub import AudioSegment
 from pydub.utils import audioop
+
+from classes import *
+class Beats2BarTask:
+    tasks = []
+    output_name = None
+    last_output: str
+    next_output: str
     
+    beat_input: BeatInput
+    beat_option: BeatOption
+    length: float
+    vctx: VideoContext
+
+    def add_task(self, task, last=False):
+        self.tasks.append({'task': task, 'last': last})
+
+    def __init__(self, **kwargs):
+        for k,v in kwargs.items():
+            setattr(self, k, v)
+
+        self.vctx = VideoContext(
+            self.fps,
+            self.resolution,
+            self.volume,
+            self.bitrate,
+            self.threads
+        )
+
+        self.add_task(self.task_load_input)
+        self.add_task(self.task_add_beatbar, True)
+
+    def task_load_input(self):
+        self.length = videoutil.get_media_length(self.video)
+
+
+        self.beat_input = beatutil.find_beatinput(self.beatinput)
+        self.beat_option = self.beat_input.get_option(self.level)
+        self.beat_option.load()
+        
+        self.filtered_beats = self.beat_option.beat_list.reduce_beats(self.clip_dist, self.beat_dist).start_end(self.length)
+        self.output_name = self.beat_input.name
+
+    def task_add_beatbar(self):
+        self.next_output = self.get_next_output()
+        tmp_vid = util.get_tmp_file('mp4')
+
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+
+            video_future = executor.submit(videoutil.apply_circles, self.beat_option.beat_list.beats, self.last_output, False, tmp_vid, bar_pos=1)
+            audio_future = executor.submit(videoutil.apply_beat_sounds, self.beat_option.beat_list.beats, self.beat_input.song, bar_pos=0, beat_sound=self.beatbar_sound, beat_volume=self.beatbar_volume)
+
+            video_result = video_future.result()
+            audio_result = audio_future.result()
+
+            if not video_result or not audio_result:
+                raise Exception("Adding beatbar failed")
+
+        videoutil.ffmpeg_run([
+            '-i "{}"'.format(tmp_vid),
+            '-i "{}"'.format(audio_result)
+        ], [], [
+            '-map 0:v',
+            '-map 1:a',
+            '-c:a copy',
+            '-c:v copy',
+            '"{}"'.format(self.next_output)
+        ], expected_length=self.length, description="Merging beat video and beat audio")
+
+        self.last_output = self.next_output
     
 def apply_beatbar(beats, video, beat_sound, output, video_length):
     if beat_sound == 'none':
@@ -102,8 +171,11 @@ def main():
             'wildcard': "Video ({})|{}".format(', '.join(videoutil.video_formats), ';'.join(videoutil.video_formats))
         }
     )
-    
-    parser.add_argument('-beat_sound', metavar="Beat sound", help='Sound effect to play on each beat (make empty or select "none" to disable)', default='beat')
+
+    beatbar_group = parser.add_argument_group("BeatBar Options")
+    parser.add_argument('-beatbar',         metavar="Beatbar",          help='Add a beatbar to the output video', action='store_true')
+    parser.add_argument('-beatbar_sound',   metavar="Beatbar sound",    help='What sound effect to use (none to disable)', default='beat')
+    parser.add_argument('-beatbar_volume',  metavar="Beatbar volume",   help='Beat sound volume multiplier (db)', default=0, type=float)
     
     args = parser.parse_args()
     with tempfile.TemporaryDirectory() as tmpdir:

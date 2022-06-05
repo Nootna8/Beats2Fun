@@ -66,7 +66,7 @@ def ffmpeg_run(pts_in, filters, pts_out, silent = True, expected_length = 0, des
                 if retcode != 0 and not error_msg:
                     error_msg = "Invalid return code"
         else:
-            with subprocess.Popen(cmd, stdout=PIPE, stderr=STDOUT, bufsize=1, universal_newlines=True) as p:
+            with subprocess.Popen(cmd, stdout=PIPE, stderr=STDOUT, bufsize=1, encoding='utf-8') as p:
                 for l in p.stdout:
                     if line_callback:
                         line_callback(l)

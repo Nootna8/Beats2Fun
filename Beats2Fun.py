@@ -12,6 +12,7 @@ from plyer import notification
 
 import concurrent.futures
 import os
+import re
 import subprocess
 from subprocess import Popen, PIPE, STDOUT
 import tempfile
@@ -23,15 +24,10 @@ import beatutil
 import parsers.parsefs
 import parsers.parsetxt
 
-class VideoOutput:
-    def __init__(self):
-        pass
-
 class Beats2FunTask:
     tasks = []
     output_name = None
     last_output: str
-    last_audio: str
     next_output: str
     
     beat_input: BeatInput
@@ -39,7 +35,6 @@ class Beats2FunTask:
     filtered_beats: BeatList
 
     length: float
-    video_output = VideoOutput()
     vctx: VideoContext
 
     def add_task(self, task, last=False):
@@ -81,7 +76,7 @@ class Beats2FunTask:
         self.beat_option.load()
         self.length = videoutil.get_media_length(self.beat_input.song)
         self.filtered_beats = self.beat_option.beat_list.reduce_beats(self.clip_dist, self.beat_dist).start_end(self.length)
-        self.output_name = self.beat_input.name
+        self.output_name = re.sub('[^A-Za-z0-9\\-\\s_\\[\\]\\(\\)]+', '', self.beat_input.name)
 
     def task_load_videos(self):
         self.video_pool = VideoPool(self.vid_folder)
@@ -147,8 +142,8 @@ class Beats2FunTask:
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
 
-            video_future = executor.submit(videoutil.apply_circles, self.beat_option.beat_list.beats, self.last_output, False, tmp_vid, bar_pos=1)
-            audio_future = executor.submit(videoutil.apply_beat_sounds, self.beat_option.beat_list.beats, self.beat_input.song, bar_pos=0, beat_sound=self.beatbar_sound, beat_volume=self.beatbar_volume)
+            video_future = executor.submit(videoutil.apply_circles, self.beat_option.beat_list.beats, self.last_output, False, tmp_vid, bar_pos=0)
+            audio_future = executor.submit(videoutil.apply_beat_sounds, self.beat_option.beat_list.beats, self.beat_input.song, bar_pos=1, beat_sound=self.beatbar_sound, beat_volume=self.beatbar_volume)
 
             video_result = video_future.result()
             audio_result = audio_future.result()
@@ -174,17 +169,20 @@ class Beats2FunTask:
         parsers.parsefs.FSParser.write_file(self.beat_option, self.output_folder + "/" + self.output_name)
         # beatutil.plot_beats(self.all_beats, self.output_folder + self.output_name, self.length)
 
-@Gooey(progress_regex=r"(?P<current>\d+)/(?P<total>\d+)",
+@Gooey(tabbed_groups=True,
+      required_cols=1,
+      optional_cols=2,
+      progress_regex=r"(?P<current>\d+)/(?P<total>\d+)",
       progress_expr="current / total * 100",
       timing_options = {'show_time_remaining':True},
-      default_size=(610, 650),
+      default_size=(550, 650),
       image_dir=util.get_resource(''))
 def main():
     parser = GooeyParser(
         description='Make a PMV based on a simfile',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
-    
+
     parser.add_argument(
         'beatinput',
         help='Path to input, chart folder / file / music file',
@@ -220,14 +218,14 @@ def main():
     parser.add_argument('-num_vids',    metavar="Video amount",     default=0, help='How many videos to randomly select from the Video folder, 0=all', type=int, widget='IntegerField')
     parser.add_argument('-recurse',     metavar="Search resursive", help='Search videos recursively', action='store_true')
     parser.add_argument('-clip_dist',   metavar="Clip distance",    default=0.4, help='Minimal clip distance in seconds', type=float, widget='DecimalField')
-    parser.add_argument('-beat_dist',   metavar="Beat distance",    type=float, widget='DecimalField')
+    parser.add_argument('-beat_dist',   metavar="Beat distance",    type=float)
     parser.add_argument('-volume',      metavar="Clip volume",      default=0.0, help='Keep the original clip audio', type=float, widget='DecimalField')
     parser.add_argument('-level',       metavar="Chart level",      default='min', help='What difficilty to pick from the chart, min/max/LEVEL', type=str)
 
     beatbar_group = parser.add_argument_group("BeatBar Options")
-    parser.add_argument('-beatbar',         metavar="Beatbar",          help='Add a beatbar to the output video', action='store_true')
-    parser.add_argument('-beatbar_sound',   metavar="Beatbar sound",    help='What sound effect to use (none to disable)', default='beat')
-    parser.add_argument('-beatbar_volume',  metavar="Beatbar volume",   help='Beat sound volume multiplier (db)', default=0, type=float)
+    beatbar_group.add_argument('-beatbar',         metavar="Beatbar",          help='Add a beatbar to the output video', action='store_true')
+    beatbar_group.add_argument('-beatbar_sound',   metavar="Beatbar sound",    help='What sound effect to use (none to disable)', default='beat')
+    beatbar_group.add_argument('-beatbar_volume',  metavar="Beatbar volume",   help='Beat sound volume multiplier (db)', default=0, type=float, widget='DecimalField')
 
     quality_group = parser.add_argument_group("Quality Options")   
     quality_group.add_argument('-fps',         metavar="FPS",              default=25, help='Output video FPS', type=int, widget='IntegerField')
@@ -235,8 +233,8 @@ def main():
     quality_group.add_argument('-bitrate',     metavar="Bit rate",         default='3M', help='Output video bitrate, higher numer is higher quality')
     
     performance_group = parser.add_argument_group("Performance Options")
-    performance_group.add_argument('-batch',       metavar="Batch size",       default=10, type=int, help='How many clips to split per thread')
-    performance_group.add_argument('-threads',     metavar="Thread count",     default=4, type=int, help='How many threads to use while generating')
+    performance_group.add_argument('-batch',       metavar="Batch size",       default=10, type=int, help='How many clips to split per thread', widget='IntegerField')
+    performance_group.add_argument('-threads',     metavar="Thread count",     default=4, type=int, help='How many threads to use while generating', widget='IntegerField')
     performance_group.add_argument('-cuda',        metavar="GPU Acceleration", help='Use Nvidia GPU Acceleration', action='store_true')
     performance_group.add_argument('-pre_seek',    metavar="Seek buffer", default=0,   help='Use when clips start forzen', type=int)
     performance_group.add_argument('-debug',       metavar="Debug", help='Show debug messages', action='store_true')

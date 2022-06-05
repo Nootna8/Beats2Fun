@@ -250,11 +250,11 @@ class VideoPool:
             beat_pos = b.start / length
             clip = False
             while tries > 0:
-                tries2 = 3
+                tries2 = 5
                 v = self.next_video()
 
                 while tries2 > 0:
-                    beat_pos_osffset = util.clamp(beat_pos + (random.random() * 0.2 - 0.1), 0, 1)
+                    beat_pos_osffset = util.clamp(beat_pos + (random.random() * 0.4 - 0.2), 0, 1)
                     clip = v.add_clip(beat_pos_osffset, b, missing_frames)
                     if clip:
                         break
