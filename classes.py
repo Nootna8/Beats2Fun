@@ -1,7 +1,8 @@
 import os
 import random
 import json
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed, wait
+from turtle import update
 from parsers import Beat
 
 import util
@@ -110,13 +111,18 @@ class VideoClip:
 
         res_pts = list(map(int, vctx.resolution.split(':')))
         if res_pts[0] != self.video.width or res_pts[1] != self.video.height:
-            filters.append('scale={}:force_original_aspect_ratio=1'.format(vctx.resolution))
-
             ratio1 = res_pts[0] / res_pts[1]
             ratio2 = self.video.width / self.video.height
-            if ratio1 != ratio2:
-                print("ratio", ratio1, ratio2)
-                filters.append('pad={}:(ow-iw)/2:(oh-ih)/2'.format(vctx.resolution))
+
+            if ratio1 == ratio2:
+                filters.append('scale={}'.format(vctx.resolution))
+            else:
+                if abs(ratio1-ratio2) > 0.4:
+                    filters.append('scale={}:force_original_aspect_ratio=decrease'.format(vctx.resolution))
+                    filters.append('pad={}:(ow-iw)/2:(oh-ih)/2'.format(vctx.resolution))
+                else:
+                    filters.append('scale={}:force_original_aspect_ratio=increase'.format(vctx.resolution))
+                    filters.append('crop={}'.format(vctx.resolution))
 
         cmd_out += [
             '-vf "{}"'.format(','.join(filters)),
@@ -146,15 +152,18 @@ class VideoClip:
             raise Exception('Clip "{}" was not created'.format(self.clip_file))
         
         try:
-            framecount = int(videoutil.ffprobe_run([
+            framecount = videoutil.ffprobe_run([
                 '-select_streams v:0',
                 '-count_packets',
                 '-show_entries stream=nb_read_packets',
                 '-of csv=p=0',
                 '-i {}'.format(self.clip_file)]
-            ))
+            )
+            if framecount == '':
+                raise Exception("Packet count error")
+            framecount = int(framecount)
         except Exception as e:
-            raise Exception("(Clip check error {} might be corrupt, try again) {}".format(self.video.file, str(e))) from e
+            raise Exception("(Clip check error {} might be corrupt, try again) Clip: {}, Error: {}".format(self.video.file, self.clip_file, str(e))) from e
 
         if framecount != self.framecount:
             raise Exception("(Clip check error {} might be corrupt, try again) {} has {} frames instead of the requested {}".format(self.video.file, self.clip_file, framecount, self.framecount))
@@ -168,6 +177,7 @@ class VideoPool:
 
     def __init__(self, video_folders):
         self.folders = video_folders.split(',')
+        self.futures = []
 
     def find_videos(self, recursive, vctx, amount):
         self.videos = []
@@ -180,7 +190,7 @@ class VideoPool:
                     for f in files:
                         for ext in videoutil.video_formats:
                             if f.endswith(ext):
-                                self.video_files.append(vf + '/' + f)
+                                self.video_files.append(root + '/' + f)
             else:
                 for f in os.listdir(vf):
                     for ext in videoutil.video_formats:
@@ -190,8 +200,6 @@ class VideoPool:
         if amount > 0:
             random.shuffle(self.video_files)
             self.video_files = self.video_files[:amount]
-
-        
 
         self.analyze_videos(vctx)
         return len(self.videos)
@@ -240,10 +248,19 @@ class VideoPool:
 
             tries = len(self.videos)
             beat_pos = b.start / length
+            clip = False
             while tries > 0:
-                beat_pos_osffset = util.clamp(beat_pos + (random.random() * 0.2 - 0.1), 0, 1)
+                tries2 = 3
                 v = self.next_video()
-                clip = v.add_clip(beat_pos_osffset, b, missing_frames)
+
+                while tries2 > 0:
+                    beat_pos_osffset = util.clamp(beat_pos + (random.random() * 0.2 - 0.1), 0, 1)
+                    clip = v.add_clip(beat_pos_osffset, b, missing_frames)
+                    if clip:
+                        break
+                    tries2 -= 1
+
+
                 if not clip:
                     tries -= 1
                     continue
@@ -261,22 +278,25 @@ class VideoPool:
             v.clips.sort(key=lambda x: x.start)
             num_clips += len(v.clips)
 
+        self.futures = []
+
         with util.Utqdm(total=num_clips, desc="Splitting videos") as pbar:
-            with ThreadPoolExecutor(max_workers=vctx.threads) as executor:
-                futures = []
-
-                for v in self.videos:
-                    for b in util.batch(v.clips, batch):
-                        future = executor.submit(self.generate_clips_thread, b, pbar, vctx)
-                        futures.append(future)
-
-                for future in futures:
-                    try:
-                        future.result()
-                    except BaseException as e:
-                        for f in futures:
-                            f.cancel()
-                        raise e
+            with ThreadPoolExecutor(max_workers=vctx.threads) as executor2:
+                with ThreadPoolExecutor(max_workers=vctx.threads) as executor:
+                    for v in self.videos:
+                        for b in util.batch(v.clips, batch):
+                            future = executor.submit(self.generate_clips_thread, b, pbar, vctx, executor2)
+                            self.futures.append(future)
+                    
+                    for future in self.futures:
+                        try:
+                            futures2 = future.result()
+                            for f in futures2:
+                                f.result()
+                        except BaseException as e:
+                            executor2.shutdown(True, cancel_futures=True)
+                            executor.shutdown(True, cancel_futures=True)
+                            raise e
         
         videos_file_name = util.get_tmp_file('txt')
         with open(videos_file_name, 'w') as f:
@@ -285,7 +305,7 @@ class VideoPool:
 
         return videos_file_name
 
-    def generate_clips_thread(self, clips, pbar, vctx):
+    def generate_clips_thread(self, clips, pbar, vctx, executor):
         cmd_in = []
         filters = []
         cmd_out = []
@@ -296,15 +316,16 @@ class VideoPool:
             filters += clip_filters
             cmd_out += clip_out
         
+        
+        def line_callback(l):
+            if 'final ratefactor' in l:
+                pbar.update(1)
+
         try:
-            videoutil.ffmpeg_run(cmd_in, None, cmd_out, True)
+            videoutil.ffmpeg_run(cmd_in, None, cmd_out, True, line_callback=line_callback)
         except Exception as e:
-            raise Exception("(Clipping error {} might be corrupt, try again) {}".format(self.file, str(e))) from e
+            raise Exception("Clipping error {}, try again".format(str(e))) from e
 
-        for c in clips:
-            c.test_file()
-
-        pbar.update(len(clips))
-
+        return [executor.submit(c.test_file) for c in clips]
 class PMVideo:
     output_path = None

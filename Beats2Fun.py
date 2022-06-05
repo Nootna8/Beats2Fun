@@ -80,9 +80,8 @@ class Beats2FunTask:
         self.beat_option = self.beat_input.get_option(self.level)
         self.beat_option.load()
         self.length = videoutil.get_media_length(self.beat_input.song)
-        self.filtered_beats = self.beat_option.beat_list.reduce_beats(self.clip_dist).start_end(self.length)
-
-        self.output_name = os.path.splitext(os.path.basename(self.beat_input.song))[0]
+        self.filtered_beats = self.beat_option.beat_list.reduce_beats(self.clip_dist, self.beat_dist).start_end(self.length)
+        self.output_name = self.beat_input.name
 
     def task_load_videos(self):
         self.video_pool = VideoPool(self.vid_folder)
@@ -221,6 +220,7 @@ def main():
     parser.add_argument('-num_vids',    metavar="Video amount",     default=0, help='How many videos to randomly select from the Video folder, 0=all', type=int, widget='IntegerField')
     parser.add_argument('-recurse',     metavar="Search resursive", help='Search videos recursively', action='store_true')
     parser.add_argument('-clip_dist',   metavar="Clip distance",    default=0.4, help='Minimal clip distance in seconds', type=float, widget='DecimalField')
+    parser.add_argument('-beat_dist',   metavar="Beat distance",    type=float, widget='DecimalField')
     parser.add_argument('-volume',      metavar="Clip volume",      default=0.0, help='Keep the original clip audio', type=float, widget='DecimalField')
     parser.add_argument('-level',       metavar="Chart level",      default='min', help='What difficilty to pick from the chart, min/max/LEVEL', type=str)
 

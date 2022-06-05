@@ -22,7 +22,7 @@ import util
 
 video_formats = ['.mp4', '.wmv', '.mov', '.m4v', '.mpg', '.avi', '.flv']
 
-def ffmpeg_run(pts_in, filters, pts_out, silent = True, expected_length = 0, description = None, bar_pos=None, block=True):
+def ffmpeg_run(pts_in, filters, pts_out, silent = True, expected_length = 0, description = None, bar_pos=None, block=True, line_callback=None):
     cmd_pts = ['ffmpeg', '-hide_banner -y'] + pts_in
     
     if filters:
@@ -39,8 +39,8 @@ def ffmpeg_run(pts_in, filters, pts_out, silent = True, expected_length = 0, des
     retcode = -1
     output = []
 
-    if util.debug_flag:
-        print(cmd)
+    # if util.debug_flag:
+        # print(cmd)
 
     try:
         error_msg = None
@@ -68,6 +68,9 @@ def ffmpeg_run(pts_in, filters, pts_out, silent = True, expected_length = 0, des
         else:
             with subprocess.Popen(cmd, stdout=PIPE, stderr=STDOUT, bufsize=1, universal_newlines=True) as p:
                 for l in p.stdout:
+                    if line_callback:
+                        line_callback(l)
+
                     if 'No decoder surfaces left' in l:
                         p.terminate()
                         error_msg = l

@@ -20,6 +20,7 @@ class SMBeatOption(BeatOption):
 
     def load(self):
         beat_times = []
+        beat_nrs = []
 
         note_data = NoteData(self.chart)
         timing_data = TimingData(self.simfile, self.chart)
@@ -30,17 +31,15 @@ class SMBeatOption(BeatOption):
             if note_time in beat_times:
                 continue
             beat_times.append(note_time)
+            beat_nrs.append(float(timed_note.note.beat))
             
-        self.beat_list = BeatList(beat_times)
+        self.beat_list = BeatList(beat_times, beat_nrs)
 
 class SMParser(BeatInput):
     file_desc = file_desc
     extensions = ['.sm', '.ssc']
 
     def find_song(self, path):
-        if self.song:
-            return self.song
-
         file_base = os.path.dirname(path)
         files = os.listdir(file_base)
         songsearch = fnmatch.filter(files, '*.mp3') + fnmatch.filter(files, '*.ogg')
@@ -56,6 +55,7 @@ class SMParser(BeatInput):
         for c in mysim.charts:
             self.options.append(SMBeatOption(mysim, c))
 
+        self.name = mysim.artist + ' - ' + mysim.title
         self.song = self.find_song(path)
 
 

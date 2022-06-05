@@ -6,52 +6,66 @@ class Beat:
     end: float
     duration: float
     index: int
+    beat_nr: int
 
-    def __init__(self, start, end, index):
+    def __init__(self, start, end, index, beat_nr=None):
         if start >= end:
-            raise Exception("Start can not be after end")
+            raise Exception("Start time: {} is bigger then end time {}".format(start, end))
 
         self.start = start
         self.end = end
         self.duration = end - start
         self.index = index
+        self.beat_nr = beat_nr
         
 class BeatList:
     beats: list
     max_speed = 530
 
-    def __init__(self, beat_times):
+    def __init__(self, beat_times, beat_nrs=None):
         self.beats = []
         
         for i,b in enumerate(beat_times[:-1]):
             next_beat = beat_times[i+1]
-            self.beats.append(Beat(b, next_beat, i))
+            beat_nr = None
+            if beat_nrs:
+                beat_nr = beat_nrs[i]
+            self.beats.append(Beat(b, next_beat, i, beat_nr))
     
     def start_end(self, length):
         new_beats = []
+        new_beat_nrs = []
+        
         if self.beats[0].start != 0:
             new_beats.append(0)
+            new_beat_nrs.append(None)
         
         for i,beat in enumerate(self.beats):
             new_beats.append(beat.start)
+            new_beat_nrs.append(beat.beat_nr)
 
         if new_beats[-1] != length:
             new_beats.append(length)
+            new_beat_nrs.append(None)
         
-        return BeatList(new_beats)
+        return BeatList(new_beats, new_beat_nrs)
 
-    def reduce_beats(self, min_distance=0.4):
+    def reduce_beats(self, min_distance=0.4, beat_dist=None):
         new_beats = [self.beats[0].start]
-        last_beat = self.beats[0]
+        new_beat_nrs = [self.beats[0].beat_nr]
 
-        for i,beat in enumerate(self.beats):
-            if beat.start - last_beat.start < min_distance:
+        for beat in self.beats[1:]:
+            if beat_dist and beat.beat_nr and beat.beat_nr % beat_dist == 0:
+                new_beats.append(beat.start)
+                new_beat_nrs.append(beat.beat_nr)
                 continue
-            
-            new_beats.append(beat.start)
-            last_beat = self.beats[i-1]
 
-        return BeatList(new_beats)
+            if beat.start - new_beats[-1] > min_distance:
+                new_beats.append(beat.start)
+                new_beat_nrs.append(beat.beat_nr)
+                continue
+
+        return BeatList(new_beats, new_beat_nrs)
 
     def get_density(self, width=100, length=None):
         values = [0 for i in range(width)]
@@ -83,16 +97,18 @@ class BeatOption:
         self.name = '{} - {}'.format(self.level, self.version)
 
 class BeatInput:
-    path = None
-    song = None
+    path: str
+    song: str
     extensions = []
-    options = []
+    options: list
     file_desc = ''
+    name: str
 
     def __init__(self, path):
         if not os.path.exists(path):
             raise Exception("{} does not exist".format(path))
         self.path = path
+        self.options = []
 
         if os.path.isdir(path):
             self.read_dir(path)

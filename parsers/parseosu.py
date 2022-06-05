@@ -19,13 +19,10 @@ class OSUBeatOption(BeatOption):
         self.parser.build_beatmap()
         bm = self.parser.beatmap
 
-        for t in bm['timingPoints']:
-            beat_times.append(t['offset'])
+        beat_times = [x['offset'] for x in bm['timingPoints']] + [x['startTime'] for x in bm["hitObjects"]]
+        # Unique values
+        beat_times = list(set(beat_times))
         
-        for h in bm["hitObjects"]:
-            if h['startTime'] not in beat_times:
-                beat_times.append(h['startTime'])
-                
         beat_times.sort()
         beat_times = list(map(lambda x: x / 1000, beat_times))
 
@@ -49,6 +46,7 @@ class OSUParser(BeatInput):
             self.options.append(OSUBeatOption(parser))
             file_dir = os.path.dirname(path)
             self.song = file_dir + "/" + parser.beatmap.get('AudioFilename')
+            self.name = parser.beatmap.get('Artist') + ' - ' + parser.beatmap.get('Title')
 
 def get_beats(beatmap):
     all_beat_times = []
