@@ -38,7 +38,7 @@ def find_beatinput(beatinput, song_required):
     if parsers.parseosu.OSUParser.supports_input(beatinput):
         return parsers.parseosu.OSUParser(beatinput)
 
-    return False
+    raise Exception("No beats avaiable for: {}".format(os.path.realpath(beatinput)))
     
 
 def beat_density(beats, width=100, length=None):

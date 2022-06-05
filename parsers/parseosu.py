@@ -39,7 +39,7 @@ class OSUParser(BeatInput):
         filename, ext = os.path.splitext(path)
         
         if ext == '.osz':
-            with ZipFile(input, 'r') as zipObj:
+            with ZipFile(path, 'r') as zipObj:
                 zipObj.extractall(util.get_tmp_dir() + '/osu')
             self.read_dir(util.get_tmp_dir() + '/osu')
 
