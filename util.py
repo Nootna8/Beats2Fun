@@ -18,6 +18,8 @@ global app_mode
 app_mode = None
 global debug_flag
 debug_flag = False
+global video_ctx
+video_ctx = None
 
 def get_tmp_file(ext):
     if not current_tmp_dir:

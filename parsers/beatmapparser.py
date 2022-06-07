@@ -77,7 +77,14 @@ class BeatmapParser():
     # Parse a timing line
     # @param  {String} line
     def parse_timing_point(self, line):
-        members = line.split(',')
+        membersline = line.split(',')
+        members = []
+        for i in range(8):
+            members.append(0)
+
+        for i,o in enumerate(membersline):
+            members[i] = o
+
 
         timing_point = {
             "offset": int(float(members[0])),

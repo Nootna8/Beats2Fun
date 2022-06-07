@@ -48,8 +48,11 @@ class Beats2FunTask:
             self.resolution,
             self.volume,
             self.bitrate,
-            self.threads
+            self.threads,
+            'libx264'
         )
+
+        util.video_ctx = self.vctx
 
         self.add_task(self.task_load_beat_input)
         self.add_task(self.task_load_videos)
@@ -103,7 +106,7 @@ class Beats2FunTask:
                 '-map 0:v',
                 '-map 1:a',
                 '-c:a aac',
-                # '-c:v h264_nvenc',
+                '-c:v {}'.format(self.vctx.video_codec),
                 '"{}"'.format(self.next_output)
             ], expected_length=self.length, description="Merging clips")
 
@@ -112,8 +115,10 @@ class Beats2FunTask:
                 '-f concat',
                 '-i "{}"'.format(self.last_output),
             ], None, [
+                '-af "aresample=48000:async=1"',
                 '-c:a aac',
-                # '-c:v h264_nvenc',
+                #'-c:v copy',
+                '-c:v {}'.format(self.vctx.video_codec),
                 '"{}"'.format(self.next_output)
             ], expected_length=self.length, description="Merging clips")
 
@@ -125,7 +130,10 @@ class Beats2FunTask:
         videoutil.ffmpeg_run([
             '-i "{}"'.format(self.last_output),
             '-i "{}"'.format(self.beat_input.song)
-        ], ["[0:a][1:a]amix=inputs=2:weights={} 1[ma]".format(self.volume)], [
+        ], [
+            #"[0:a]aresample=48000:async=1[resam]",
+            "[0:a][1:a]amix=inputs=2:weights={} 1[ma]".format(self.volume)
+        ], [
             '-map 0:v',
             '-map [ma]',
             '-c:a aac',
@@ -140,9 +148,12 @@ class Beats2FunTask:
         tmp_vid = util.get_tmp_file('mp4')
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
+            audio_input = self.beat_input.song
+            if self.volume > 0:
+                audio_input = self.last_output
 
             video_future = executor.submit(videoutil.apply_circles, self.beat_option.beat_list.beats, self.last_output, False, tmp_vid, bar_pos=0, expected_length=self.length)
-            audio_future = executor.submit(videoutil.apply_beat_sounds, self.beat_option.beat_list.beats, self.beat_input.song, bar_pos=1, beat_sound=self.beatbar_sound, beat_volume=self.beatbar_volume)
+            audio_future = executor.submit(videoutil.apply_beat_sounds, self.beat_option.beat_list.beats, audio_input, bar_pos=1, beat_sound=self.beatbar_sound, beat_volume=self.beatbar_volume)
 
             video_result = video_future.result()
             audio_result = audio_future.result()

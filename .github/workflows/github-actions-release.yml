@@ -47,7 +47,7 @@ jobs:
       run: |
         cd ${{ github.workspace }}
         conda activate test
-        python Beats2Fun.py ".github/test/1631947 KUMOKIRI - Shippuujinrai.osz" .github/test/data -debug
+        python Beats2Fun.py ".github/test/1631947 KUMOKIRI - Shippuujinrai.osz" .github/test/data out -debug
     
   build:
 

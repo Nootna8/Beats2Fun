@@ -16,14 +16,16 @@ class VideoContext:
     bitrate: str
     threads: int
     frame_time: float
+    video_codec: str
 
-    def __init__(self, fps, resolution, volume, bitrate, threads) -> None:
+    def __init__(self, fps, resolution, volume, bitrate, threads, video_codec) -> None:
         self.fps = fps
         self.resolution = resolution
         self.volume = volume
         self.bitrate = bitrate
         self.threads = threads
         self.frame_time = 1/self.fps
+        self.video_codec = video_codec
 class LoadedVideo:
     file: str
     width: int
@@ -128,7 +130,7 @@ class VideoClip:
         self.framecount = framecount
         self.clip_file = '{}/{}.mp4'.format(util.get_tmp_dir(), self.beat.index)
 
-    def ffmpeg_options(self, vctx, subindex):
+    def ffmpeg_options(self, vctx: VideoContext, subindex):
         cmd_in = [
             '-ss {}'.format(videoutil.timestamp(max(0, self.start))),
             '-t {}'.format(self.beat.duration + 0.5),
@@ -161,8 +163,12 @@ class VideoClip:
         if vctx.volume > 0:
             cmd_out += [
                 '-ac 2',
+                '-ar:a 48000',
+                '-af "atrim=duration={length},apad=whole_dur={length}:packet_size=64"'.format(length = vctx.frame_time * self.framecount),
+                #'-af "atrim=duration={length}"'.format(length = vctx.frame_time * self.framecount),
                 '-shortest',
-                # '-fflags shortest',
+                '-avoid_negative_ts make_zero',
+                # '-fflags +genpts',
                 '-map {}:a'.format(subindex),
                 '-c:a aac',
                 '-b:a 192k'
@@ -170,6 +176,7 @@ class VideoClip:
             
         cmd_out +=[
             '-b:v {}'.format(vctx.bitrate),
+            '-c:v {}'.format('libx264'),
             self.clip_file
         ]
 
@@ -181,17 +188,35 @@ class VideoClip:
         
         try:
             cmd = [
-                '-select_streams v:0',
-                '-count_packets',
-                '-show_entries stream=nb_read_packets',
-                '-of csv=p=0',
+                '-count_frames',
+                '-show_entries stream=nb_read_frames,channels,codec_type,duration',
+                '-print_format json',
                 '-i {}'.format(self.clip_file)
             ]
-            framecount = videoutil.ffprobe_run(cmd)
-            if framecount == '':
+            result = json.loads(videoutil.ffprobe_run(cmd))
+            framecount = -1
+            channels = -1
+            audio_lenth = -1
+            video_length = -1
+            for s in result['streams']:
+                if s['codec_type'] == 'video':
+                    if framecount == -1:
+                        framecount = int(s['nb_read_frames'])
+                        video_length = float(s['duration'])
+                if s['codec_type'] == 'audio':
+                    if channels == -1:
+                        channels = s['channels']
+                        audio_lenth = float(s['duration'])
+
+            if util.video_ctx and util.video_ctx.volume > 0:
+                if channels > 2:
+                    raise Exception("Too many audio channels: {}".format(channels))
+                #if audio_lenth != video_length:
+                #    raise Exception("Audio / Video length not matching {} - {}".format(audio_lenth, video_length))
+
+            if not framecount:
                 error = videoutil.ffprobe_run(cmd, False)
                 raise Exception("Packet count error: {}".format(error))
-            framecount = int(framecount)
         except Exception as e:
             raise Exception("(Clip check error {} might be corrupt, try again) Clip: {}, Error: {}".format(self.video.file, self.clip_file, str(e))) from e
 
@@ -345,7 +370,7 @@ class VideoPool:
                 pbar.update(1)
 
         try:
-            result = videoutil.ffmpeg_run(cmd_in, None, cmd_out, True, line_callback=line_callback)
+            result = videoutil.ffmpeg_run(cmd_in, None, cmd_out, True, line_callback=line_callback, ignore_errors=True)
             for c in clips:
                 c.ffresult = result
         except Exception as e:
