@@ -8,7 +8,6 @@ import sys
 from gooey import Gooey, GooeyParser
 import argparse
 from tqdm import tqdm
-from plyer import notification
 
 import concurrent.futures
 import os
@@ -75,7 +74,7 @@ class Beats2FunTask:
         self.beat_option = self.beat_input.get_option(self.level)
         self.beat_option.load()
         self.length = videoutil.get_media_length(self.beat_input.song)
-        self.filtered_beats = self.beat_option.beat_list.reduce_beats(self.clip_dist, self.beat_dist).start_end(self.length)
+        self.filtered_beats = self.beat_option.beat_list.start_end(self.length).reduce_beats(self.clip_dist, self.beat_dist).start_end(self.length)
         self.output_name = re.sub('[^A-Za-z0-9\\-\\s_\\[\\]\\(\\)]+', '', self.beat_input.name)
 
     def task_load_videos(self):
@@ -104,7 +103,7 @@ class Beats2FunTask:
                 '-map 0:v',
                 '-map 1:a',
                 '-c:a aac',
-                '-c:v h264_nvenc',
+                # '-c:v h264_nvenc',
                 '"{}"'.format(self.next_output)
             ], expected_length=self.length, description="Merging clips")
 
@@ -114,7 +113,7 @@ class Beats2FunTask:
                 '-i "{}"'.format(self.last_output),
             ], None, [
                 '-c:a aac',
-                '-c:v h264_nvenc',
+                # '-c:v h264_nvenc',
                 '"{}"'.format(self.next_output)
             ], expected_length=self.length, description="Merging clips")
 
@@ -142,7 +141,7 @@ class Beats2FunTask:
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
 
-            video_future = executor.submit(videoutil.apply_circles, self.beat_option.beat_list.beats, self.last_output, False, tmp_vid, bar_pos=0)
+            video_future = executor.submit(videoutil.apply_circles, self.beat_option.beat_list.beats, self.last_output, False, tmp_vid, bar_pos=0, expected_length=self.length)
             audio_future = executor.submit(videoutil.apply_beat_sounds, self.beat_option.beat_list.beats, self.beat_input.song, bar_pos=1, beat_sound=self.beatbar_sound, beat_volume=self.beatbar_volume)
 
             video_result = video_future.result()
@@ -205,11 +204,10 @@ def main():
     )
     
     parser.add_argument(
-        '-output_folder',
+        'output_folder',
         help='Where to store the output videos / scripts',
         widget='DirChooser',
         metavar="Output folder",
-        default="out",
         gooey_options={
             'message': "Pick output folder"
         }
@@ -220,7 +218,7 @@ def main():
     parser.add_argument('-clip_dist',   metavar="Clip distance",    default=0.4, help='Minimal clip distance in seconds', type=float, widget='DecimalField')
     parser.add_argument('-beat_dist',   metavar="Beat distance",    type=float)
     parser.add_argument('-volume',      metavar="Clip volume",      default=0.0, help='Keep the original clip audio', type=float, widget='DecimalField')
-    parser.add_argument('-level',       metavar="Chart level",      default='min', help='What difficilty to pick from the chart, min/max/LEVEL', type=str)
+    parser.add_argument('-level',       metavar="Chart level",      default='min', help='What difficilty to pick from the chart, min/max/rnd/LEVEL', type=str)
 
     beatbar_group = parser.add_argument_group("BeatBar Options")
     beatbar_group.add_argument('-beatbar',         metavar="Beatbar",          help='Add a beatbar to the output video', action='store_true')
@@ -256,19 +254,18 @@ def main():
     if len(pts) != 2 or (int(pts[0]) %2) > 0 or (int(pts[1]) %2) > 0:
         print("Unusable resolution: {}".format(args.resolution))
         sys.exit(1)
-    
-    #with tempfile.TemporaryDirectory() as tmpdir:
-    util.current_tmp_dir = 'tmp'
-    start_time = time.time()
-    # result = make_pmv(**vars(args))
 
     if args.debug:
         util.debug_flag = True
-
-    runner = Beats2FunTask(**vars(args))
-
+    
     try:
-        runner.run()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            #util.current_tmp_dir = 'tmp'
+            util.current_tmp_dir = tmpdir
+            start_time = time.time()
+            runner = Beats2FunTask(**vars(args))
+            runner.run()
+
     except BaseException as e:
         if util.debug_flag:
             raise e
@@ -277,13 +274,6 @@ def main():
         sys.exit(1)
 
     print(runner.last_output + " is done")
-    try:
-        notification.notify(
-            title = "Beats2Fun",
-            message = runner.last_output + " is done",
-            timeout = 5)
-    except:
-        pass
 
     if util.app_mode != 'goo':
         print('Generation took: {}'.format(videoutil.timestamp(time.time() - start_time)))

@@ -1,6 +1,5 @@
 import os
-#from .. import util
-
+import random
 class Beat:
     start: float
     end: float
@@ -86,10 +85,10 @@ class BeatList:
         return values
 
 class BeatOption:
-    level = -1
-    version = ''
-    name = ''
-    beat_list = None
+    level: float
+    version: str
+    name: str
+    beat_list: BeatList
     
     def __init__(self, level, version):
         self.level = level
@@ -100,7 +99,7 @@ class BeatInput:
     path: str
     song: str
     extensions = []
-    options: list
+    options: list[BeatOption]
     file_desc = ''
     name: str
 
@@ -137,11 +136,14 @@ class BeatInput:
         raise Exception("Not implemented")
 
     def get_option(self, level=None):
-        if level in ['min', 'max']:
+        if level in ['min', 'max', 'rnd']:
             self.options.sort(key=lambda x: x.level)
             if level == 'max':
                 return self.options[-1]
             if level == 'min':
+                return self.options[0]
+            if level == 'rnd':
+                random.shuffle(self.options)
                 return self.options[0]
 
 

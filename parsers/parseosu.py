@@ -19,7 +19,8 @@ class OSUBeatOption(BeatOption):
         self.parser.build_beatmap()
         bm = self.parser.beatmap
 
-        beat_times = [x['offset'] for x in bm['timingPoints']] + [x['startTime'] for x in bm["hitObjects"]]
+        beat_times = [x['offset'] for x in bm['timingPoints']] + [x['startTime'] for x in bm["hitObjects"]] + [x['end_time'] for x in bm["hitObjects"] if 'end_time' in x]
+        beat_times = [x for x in beat_times if x >= 0]
         # Unique values
         beat_times = list(set(beat_times))
         

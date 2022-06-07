@@ -6,6 +6,7 @@ from matplotlib.colors import LinearSegmentedColormap
 from colour import Color
 
 import util
+import random
 
 import parsers.parsefs
 import parsers.parseosu
@@ -31,7 +32,29 @@ def find_beats(input, option=None, song_required=False):
     
     return False
 
-def find_beatinput(beatinput, song_required):
+def find_beatinput(beatinput: str, song_required: bool):
+    if beatinput.startswith('rnd:'):
+        beatinput = beatinput[4:]
+        if not os.path.isdir(beatinput):
+            raise Exception("Random only supports folders")
+
+        def is_option(path):
+            if not os.path.isdir(path):
+                return False
+
+            if parsers.parsesm.SMParser.supports_input(path):
+                return True
+
+            if parsers.parseosu.OSUParser.supports_input(path):
+                return True
+
+            return False
+
+        options = [ f.path for f in os.scandir(beatinput) if is_option(f.path) ]
+        random.shuffle(options)
+        beatinput = options[0]
+        print("Randomly selected: {}".format(beatinput))
+
     if parsers.parsesm.SMParser.supports_input(beatinput):
         return parsers.parsesm.SMParser(beatinput)
 

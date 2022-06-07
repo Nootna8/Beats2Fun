@@ -16,7 +16,7 @@ jobs:
       shell: bash -l {0}
       run: |
         sudo apt update
-        sudo apt install ffmpeg ffprobe
+        sudo apt install ffmpeg
         conda activate test
         conda install -c conda-forge wxpython
         pip3 install -r requirements.txt
@@ -36,7 +36,6 @@ jobs:
       run: |
         cd .github/test
         mkdir data
-        wget "https://beatconnect.io/b/1631947/Zl6h9inp/" -O "data/1631947 KUMOKIRI - Shippuujinrai.osz"
         unzip "Stamina Alley Part 1.zip" -d data
         youtube-dl -f 'bestvideo[height<=720]+best[filesize<50M]' "https://www.youtube.com/watch?v=WMweEpGlu_U" -o "data/%(title)s.%(ext)s"
         youtube-dl -f 'bestvideo[height<=720]+best[filesize<50M]' "https://www.youtube.com/watch?v=Z8Z51no1TD0" -o "data/%(title)s.%(ext)s"
@@ -48,7 +47,7 @@ jobs:
       run: |
         cd ${{ github.workspace }}
         conda activate test
-        python Beats2Fun.py ".github/test/data/1631947 KUMOKIRI - Shippuujinrai.osz" .github/test/data -debug
+        python Beats2Fun.py ".github/test/1631947 KUMOKIRI - Shippuujinrai.osz" .github/test/data -debug
     
   build:
 

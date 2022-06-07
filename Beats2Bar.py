@@ -53,7 +53,7 @@ class Beats2BarTask:
         self.beat_option = self.beat_input.get_option(self.level)
         self.beat_option.load()
         
-        self.filtered_beats = self.beat_option.beat_list.reduce_beats(self.clip_dist, self.beat_dist).start_end(self.length)
+        self.filtered_beats = self.beat_option.beat_list.start_end(self.length).reduce_beats(self.clip_dist, self.beat_dist).start_end(self.length)
         self.output_name = self.beat_input.name
 
     def task_add_beatbar(self):

@@ -105,13 +105,22 @@ def ffmpeg_run(pts_in, filters, pts_out, silent = True, expected_length = 0, des
         print("Exception during ffmpeg: {}, Errorcode: {}, Output: {}".format(cmd, retcode, "\n".join(output)))
         raise e
 
-def ffprobe_run(pts_in):
-    cmd_pts = ['ffprobe', '-v error'] + pts_in
+    return {
+        'command': cmd,
+        'retcode': retcode,
+        'output': output
+    }
+
+def ffprobe_run(pts_in, suppress_errors=True):
+    cmd_pts = ['ffprobe']
+    if suppress_errors:
+        cmd_pts.append('-v error')
+    cmd_pts += pts_in
     cmd = ' '.join(cmd_pts)
     retcode = -1
 
     try:
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         retcode = result.returncode
         if retcode != 0:
             raise Exception("Invalid return code")
@@ -510,7 +519,7 @@ def clips_merge(output, audio, vids_file, expected_length):
         cmd_out.append('-c:a aac')
 
     # cmd_out.append('-c copy')
-    cmd_out.append('-c:v h264_nvenc')
+    # cmd_out.append('-c:v h264_nvenc')
     
     cmd_out.append('"{}"'.format(output))
 
@@ -546,7 +555,7 @@ def apply_beat_sounds(beats, input, beat_sound='beat', input_length=None, bar_po
     video_audio_b = bytearray(video_audio_s._data)
     beat_sound_b = beat_sound_s._data
     
-    for i,b in enumerate(util.Utqdm(beats[:-1], desc="Overlaying beat sounds", position=bar_pos)):
+    for i,b in enumerate(util.Utqdm(beats[:-1], desc="Overlaying beat sounds")):
         pos = len(video_audio_s[:b.start * 1000]._data)
         
         video_sample = video_audio_b[pos:pos + len(beat_sound_b)]
@@ -625,7 +634,7 @@ def apply_circles(beats, video, keep_audio, output, expected_length = 0, bar_pos
         vnum += 1
         
     pts_out = [
-        '-c:v h264_nvenc',
+        # '-c:v h264_nvenc',
         '-map [v{}]'.format(vnum)
     ]
     
@@ -633,7 +642,7 @@ def apply_circles(beats, video, keep_audio, output, expected_length = 0, bar_pos
         pts_out.append('-map 0:a')
 
     pts_out.append('"{}"'.format(output))
-    ffmpeg_run(pts_in, filters, pts_out, expected_length=expected_length, description="Applying beat circles", bar_pos=bar_pos)
+    ffmpeg_run(pts_in, filters, pts_out, expected_length=expected_length, description="Applying beat circles")
         
     return True
 

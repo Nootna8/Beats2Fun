@@ -24,14 +24,13 @@ class VideoContext:
         self.bitrate = bitrate
         self.threads = threads
         self.frame_time = 1/self.fps
-
 class LoadedVideo:
     file: str
     width: int
     height: int
     length: float
     audio_channels: int
-    clips: list
+    clips: list['VideoClip']
     start_at: float
     end_at: float
     usable_duration: float
@@ -51,16 +50,17 @@ class LoadedVideo:
         #    raise Exception("(Video {} might be corrupt) Failed to get video length".format(file))
 
         vid_stream = [s for s in result["streams"] if s["codec_type"] == "video"][0]
-        audio_stream = [s for s in result["streams"] if s["codec_type"] == "audio"][0]
+        audio_streams = [s for s in result["streams"] if s["codec_type"] == "audio"]
+        if len(audio_streams) > 0:
+            self.audio_channels = audio_streams[0]["channels"]
         
         self.width = vid_stream["width"]
         self.height = vid_stream["height"]
         self.length = float(result["format"]["duration"])
-        self.audio_channels = audio_stream["channels"]
         trim_length = 10
         self.start_at = trim_length
         self.end_at = self.length - trim_length
-        self.usable_duration = self.end_at = self.start_at
+        self.usable_duration = self.end_at - self.start_at
 
         self.clips = []
     
@@ -69,16 +69,43 @@ class LoadedVideo:
         if self.width %2 > 0 or self.height %2 > 0:
             return False
 
+        if self.usable_duration < 1:
+            return False
+
         return True
 
-    def add_clip(self, position, beat, framecount):
-        clip_start = self.start_at + (position * self.usable_duration)
-        clip_end = clip_start + beat.duration
-        if clip_end > self.length:
+    def add_clip(self, position, beat: Beat, framecount):
+        usable_spaces = []
+        search_range = 0.3
+
+        if len(self.clips) == 0:
+            usable_spaces.append((self.start_at, self.end_at))
+        else:
+            if self.clips[0].start > self.start_at:
+                usable_spaces.append((self.start_at, self.clips[0].start))
+            for i,c in enumerate(self.clips[1:]):
+                if self.clips[i-1].end < c.start:
+                    usable_spaces.append((self.clips[i-1].end, c.start))
+            if self.clips[-1].end < self.end_at:
+                usable_spaces.append((self.clips[-1].end, self.end_at))
+
+        search_from = self.start_at + (max(0, position - (search_range/2)) * self.usable_duration)
+        search_to = self.start_at + (min(1, position + (search_range/2)) * self.usable_duration)
+        usable_pieces = []
+        for s in usable_spaces:
+            space_from = max(s[0], search_from)
+            space_to = min(s[1], search_to)
+            if space_to - space_from < beat.duration:
+                continue
+
+            usable_pieces.append((space_from, space_to))
+        
+        if len(usable_pieces) == 0:
             return False
-        for c in self.clips:
-            if c.start <= clip_end and c.end >= clip_start:
-                return False
+
+        random.shuffle(usable_pieces)
+        search_space = usable_pieces[0][1] - usable_pieces[0][0] - beat.duration
+        clip_start = usable_pieces[0][0] + (random.random() * search_space)
 
         clip = VideoClip(self, beat, clip_start, framecount)
         self.clips.append(clip)
@@ -91,6 +118,7 @@ class VideoClip:
     end: float
     framecount: int
     clip_file: str
+    ffresult: dict
 
     def __init__(self, video, beat, start, framecount):
         self.video = video
@@ -152,15 +180,17 @@ class VideoClip:
             raise Exception('Clip "{}" was not created'.format(self.clip_file))
         
         try:
-            framecount = videoutil.ffprobe_run([
+            cmd = [
                 '-select_streams v:0',
                 '-count_packets',
                 '-show_entries stream=nb_read_packets',
                 '-of csv=p=0',
-                '-i {}'.format(self.clip_file)]
-            )
+                '-i {}'.format(self.clip_file)
+            ]
+            framecount = videoutil.ffprobe_run(cmd)
             if framecount == '':
-                raise Exception("Packet count error")
+                error = videoutil.ffprobe_run(cmd, False)
+                raise Exception("Packet count error: {}".format(error))
             framecount = int(framecount)
         except Exception as e:
             raise Exception("(Clip check error {} might be corrupt, try again) Clip: {}, Error: {}".format(self.video.file, self.clip_file, str(e))) from e
@@ -227,7 +257,7 @@ class VideoPool:
         self.videos.append(LoadedVideo(video))
         pbar.update()
 
-    def next_video(self):
+    def next_video(self) -> LoadedVideo:
         self.videoindex += 1
 
         if self.videoindex >= len(self.videos):
@@ -245,22 +275,15 @@ class VideoPool:
 
             last_frame_time = framenr * vctx.frame_time
             missing_frames = math.floor((b.end - last_frame_time) / vctx.frame_time)
+            if missing_frames == 0:
+                continue
 
             tries = len(self.videos)
             beat_pos = b.start / length
-            clip = False
+
             while tries > 0:
-                tries2 = 5
                 v = self.next_video()
-
-                while tries2 > 0:
-                    beat_pos_osffset = util.clamp(beat_pos + (random.random() * 0.4 - 0.2), 0, 1)
-                    clip = v.add_clip(beat_pos_osffset, b, missing_frames)
-                    if clip:
-                        break
-                    tries2 -= 1
-
-
+                clip = v.add_clip(beat_pos, b, missing_frames)
                 if not clip:
                     tries -= 1
                     continue
@@ -281,7 +304,7 @@ class VideoPool:
         self.futures = []
 
         with util.Utqdm(total=num_clips, desc="Splitting videos") as pbar:
-            with ThreadPoolExecutor(max_workers=vctx.threads) as executor2:
+            with ThreadPoolExecutor(max_workers=2) as executor2:
                 with ThreadPoolExecutor(max_workers=vctx.threads) as executor:
                     for v in self.videos:
                         for b in util.batch(v.clips, batch):
@@ -322,9 +345,13 @@ class VideoPool:
                 pbar.update(1)
 
         try:
-            videoutil.ffmpeg_run(cmd_in, None, cmd_out, True, line_callback=line_callback)
+            result = videoutil.ffmpeg_run(cmd_in, None, cmd_out, True, line_callback=line_callback)
+            for c in clips:
+                c.ffresult = result
         except Exception as e:
             raise Exception("Clipping error {}, try again".format(str(e))) from e
+
+        
 
         return [executor.submit(c.test_file) for c in clips]
 class PMVideo:
