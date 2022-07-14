@@ -17,10 +17,8 @@ jobs:
       run: |
         sudo apt update
         sudo apt install ffmpeg
-        conda activate test
         conda install -c conda-forge wxpython
         pip3 install -r requirements.txt
-        pip3 install youtube-dl
     
     - name: Cache testdata
       uses: actions/cache@v3
@@ -37,18 +35,20 @@ jobs:
         cd .github/test
         mkdir data
         unzip "Stamina Alley Part 1.zip" -d data
-        youtube-dl -f 'bestvideo[height<=720]+best[filesize<50M]' "https://www.youtube.com/watch?v=WMweEpGlu_U" -o "data/%(title)s.%(ext)s"
-        youtube-dl -f 'bestvideo[height<=720]+best[filesize<50M]' "https://www.youtube.com/watch?v=Z8Z51no1TD0" -o "data/%(title)s.%(ext)s"
-        youtube-dl -f 'bestvideo[height<=720]+best[filesize<50M]' "https://www.youtube.com/watch?v=HbkBVxU5K5A" -o "data/%(title)s.%(ext)s"
-        youtube-dl -f 'bestvideo[height<=720]+best[filesize<50M]' "https://www.youtube.com/watch?v=0lapF4DQPKQ" -o "data/%(title)s.%(ext)s"
+        ffmpeg -f lavfi -i color=color=red -t 120 data/red.mp4
+        ffmpeg -f lavfi -i color=color=green -t 120 data/green.mp4
+        ffmpeg -f lavfi -i color=color=blue -t 120 data/blue.mp4
+        ffmpeg -f lavfi -i color=color=purple -t 120 data/purple.mp4
+        ffmpeg -f lavfi -i color=color=black -t 120 data/black.mp4
+        ffmpeg -f lavfi -i color=color=white -t 120 data/white.mp4
         
     - name: Running tests
       shell: bash -l {0}
       run: |
         cd ${{ github.workspace }}
-        conda activate test
         python Beats2Fun.py ".github/test/1631947 KUMOKIRI - Shippuujinrai.osz" .github/test/data out -debug
-    
+        python Beats2Fun.py ".github/test/data/Powerflux" .github/test/data out -debug
+
   build:
 
     runs-on: ubuntu-latest
