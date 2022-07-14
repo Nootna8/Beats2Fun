@@ -49,7 +49,8 @@ class Beats2FunTask:
             self.volume,
             self.bitrate,
             self.threads,
-            'libx264'
+            'h264_nvenc'
+            #'libx264'
         )
 
         util.video_ctx = self.vctx
