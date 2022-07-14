@@ -2,12 +2,15 @@
 # Please adjust to your needs (see https://www.gitpod.io/docs/config-gitpod-file)
 # and commit this file to your remote git repository to share the goodness with others.
 
-image:
-  file: Dockerfile-gitpod
+image: gitpod/workspace-full-vnc
 
 tasks:
   - name: Setup conda
     init: |
+      wget https://repo.anaconda.com/miniconda/Miniconda3-py39_4.12.0-Linux-x86_64.sh -O /tmp/miniconda.sh
+      /bin/bash /tmp/miniconda.sh -b
+      export PATH=$PATH:/home/gitpod/miniconda3/bin
+      conda init bash
       eval "$(conda shell.bash hook)"
       conda install -c conda-forge wxpython -y
       pip install -r requirements.txt
