@@ -49,9 +49,11 @@ class Beats2FunTask:
             self.volume,
             self.bitrate,
             self.threads,
-            'h264_nvenc'
-            #'libx264'
+            'libx264'
         )
+
+        if self.cuda:
+            self.vctx.video_codec = 'h264_nvenc'
 
         util.video_ctx = self.vctx
 
@@ -100,27 +102,27 @@ class Beats2FunTask:
         self.next_output = self.get_next_output()
         if self.volume == 0:
             videoutil.ffmpeg_run([
-                '-f concat',
-                '-i "{}"'.format(self.last_output),
-                '-i "{}"'.format(self.beat_input.song)
+                '-f', 'concat',
+                '-i', self.last_output,
+                '-i', self.beat_input.song
             ], None, [
-                '-map 0:v',
-                '-map 1:a',
-                '-c:a aac',
-                '-c:v {}'.format(self.vctx.video_codec),
-                '"{}"'.format(self.next_output)
+                '-map', '0:v',
+                '-map', '1:a',
+                '-c:a', 'aac',
+                '-c:v', self.vctx.video_codec,
+                self.next_output
             ], expected_length=self.length, description="Merging clips")
 
         else:
             videoutil.ffmpeg_run([
-                '-f concat',
-                '-i "{}"'.format(self.last_output),
+                '-f', 'concat',
+                '-i', self.last_output,
             ], None, [
-                '-af "aresample=48000:async=1"',
-                '-c:a aac',
+                '-af', 'aresample=48000:async=1',
+                '-c:a', 'aac',
                 #'-c:v copy',
-                '-c:v {}'.format(self.vctx.video_codec),
-                '"{}"'.format(self.next_output)
+                '-c:v', self.vctx.video_codec,
+                self.next_output
             ], expected_length=self.length, description="Merging clips")
 
         self.last_output = self.next_output
@@ -129,17 +131,17 @@ class Beats2FunTask:
         self.next_output = self.get_next_output()
 
         videoutil.ffmpeg_run([
-            '-i "{}"'.format(self.last_output),
-            '-i "{}"'.format(self.beat_input.song)
+            '-i', self.last_output,
+            '-i', self.beat_input.song
         ], [
             #"[0:a]aresample=48000:async=1[resam]",
             "[0:a][1:a]amix=inputs=2:weights={} 1[ma]".format(self.volume)
         ], [
-            '-map 0:v',
-            '-map [ma]',
-            '-c:a aac',
-            '-c:v copy',
-            '"{}"'.format(self.next_output)
+            '-map', '0:v',
+            '-map', '[ma]',
+            '-c:a', 'aac',
+            '-c:v', 'copy',
+            self.next_output
         ], expected_length=self.length, description="Adding music")
 
         self.last_output = self.next_output
@@ -163,14 +165,14 @@ class Beats2FunTask:
                 raise Exception("Adding beatbar failed")
 
         videoutil.ffmpeg_run([
-            '-i "{}"'.format(tmp_vid),
-            '-i "{}"'.format(audio_result)
+            '-i', tmp_vid,
+            '-i', audio_result
         ], [], [
-            '-map 0:v',
-            '-map 1:a',
-            '-c:a copy',
-            '-c:v copy',
-            '"{}"'.format(self.next_output)
+            '-map', '0:v',
+            '-map', '1:a',
+            '-c:a', 'copy',
+            '-c:v', 'copy',
+            self.next_output
         ], expected_length=self.length, description="Merging beat video and beat audio")
 
         self.last_output = self.next_output
@@ -201,7 +203,7 @@ def main():
         metavar="Input",
         gooey_options={
             'message': "Pick your input",
-            'wildcard': "Simfile (*.sm,*.ssc)|*.sm;*.ssc|Osu beatmap (*.osu,*.osz)|*.osu;*.osz|Music (*.mp3,*.ogg,*.wav)|*.mp3;*.ogg;*.wav"
+            'wildcard': beatutil.file_select_options()
         }
     )
 
@@ -272,6 +274,7 @@ def main():
     
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
+            #print(tmpdir)
             #util.current_tmp_dir = 'tmp'
             util.current_tmp_dir = tmpdir
             start_time = time.time()

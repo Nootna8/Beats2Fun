@@ -10,7 +10,6 @@ from glob import glob
 import fnmatch
 import math
 import random
-from turtle import position
 from matplotlib.pyplot import title
 
 import util
@@ -23,19 +22,20 @@ import util
 video_formats = ['.mp4', '.wmv', '.mov', '.m4v', '.mpg', '.avi', '.flv']
 
 def ffmpeg_run(pts_in, filters, pts_out, silent = True, expected_length = 0, description = None, bar_pos=None, block=True, line_callback=None, ignore_errors=False):
-    cmd_pts = ['ffmpeg', '-hide_banner -y'] + pts_in
+    cmd_pts = ['ffmpeg', '-hide_banner', '-y'] + pts_in
     
     if filters:
         if len(filters) > 10:
             filters_file = util.get_tmp_file('txt')
             with open(filters_file, 'w') as tf:
                 tf.write(';\n'.join(filters))
-            cmd_pts.append('-filter_complex_script "{}"'.format(filters_file))    
+            cmd_pts += ['-filter_complex_script', filters_file]    
         else:
-            cmd_pts.append('-filter_complex "{}"'.format(';'.join(filters)))
+            cmd_pts += ['-filter_complex', ';'.join(filters)]
         
     cmd_pts += pts_out
-    cmd = ' '.join(cmd_pts)
+    cmd_pts = list(map(str, cmd_pts))
+
     retcode = -1
     output = []
 
@@ -66,7 +66,7 @@ def ffmpeg_run(pts_in, filters, pts_out, silent = True, expected_length = 0, des
                 if retcode != 0 and not error_msg:
                     error_msg = "Invalid return code"
         else:
-            with subprocess.Popen(cmd, stdout=PIPE, stderr=STDOUT, bufsize=1, encoding='utf-8') as p:
+            with subprocess.Popen(cmd_pts, stdout=PIPE, stderr=STDOUT, bufsize=1, encoding='utf-8') as p:
                 for l in p.stdout:
                     if line_callback:
                         line_callback(l)
@@ -102,11 +102,12 @@ def ffmpeg_run(pts_in, filters, pts_out, silent = True, expected_length = 0, des
         if retcode == 255:
             raise Exception("Canceled")
 
-        print("Exception during ffmpeg: {}, Errorcode: {}, Output: {}".format(cmd, retcode, "\n".join(output)))
+        print("Exception during ffmpeg: {}, Errorcode: {}, Output: {}".format(' '.join(cmd_pts), retcode, "\n".join(output)))
+        sys.exit()
         raise e
 
     return {
-        'command': cmd,
+        'command': cmd_pts,
         'retcode': retcode,
         'output': output
     }
@@ -114,20 +115,19 @@ def ffmpeg_run(pts_in, filters, pts_out, silent = True, expected_length = 0, des
 def ffprobe_run(pts_in, suppress_errors=True):
     cmd_pts = ['ffprobe']
     if suppress_errors:
-        cmd_pts.append('-v error')
+        cmd_pts += ['-v', 'error']
     cmd_pts += pts_in
-    cmd = ' '.join(cmd_pts)
     retcode = -1
 
     try:
         # result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        result = subprocess.run(cmd, stdout=subprocess.PIPE)
+        result = subprocess.run(cmd_pts, stdout=subprocess.PIPE)
         retcode = result.returncode
         if retcode != 0:
-            raise Exception("Invalid return code")
+            raise Exception("Invalid return code: {}".format(retcode))
         return result.stdout.strip().decode("utf-8")
     except BaseException as e:
-        print("Exception during ffprobe: {}, Errorcode: {}".format(cmd, retcode))
+        print("Exception during ffprobe: {}, Errorcode: {}".format(' '.join(cmd_pts), retcode))
         raise e
 
 def videos_get(vid_folder, vids_deep, num_vids, num_threads=4):
@@ -145,17 +145,6 @@ def videos_get(vid_folder, vids_deep, num_vids, num_threads=4):
                 for ext in video_formats:
                     if f.endswith(ext):
                         videos.append(vf + '/' + f)
-        
-
-        
-
-        #for ext in video_formats:
-        #    matches = list(fnmatch.filter(files, '*' + ext))
-        #    for m in matches:
-        #        videos.append(vf + '/' + m)
-            #videos += glob(vf + "/*" + ext)
-            #if vids_deep:
-            #    videos += glob(vf + "/**/*" + ext, recursive=True)
         
     if num_vids > 0:
         random.shuffle(videos)
@@ -192,7 +181,7 @@ def videos_get(vid_folder, vids_deep, num_vids, num_threads=4):
     return video_states
 
 def get_media_length(input):
-    return float(ffprobe_run(['-show_entries format=duration', '-of csv="p=0"', '-i "{}"'.format(input)]))
+    return float(ffprobe_run(['-show_entries', 'format=duration', '-of', 'csv=p=0', '-i', input]))
 
 def timestamp(seconds):
     minutes = seconds // 60
@@ -246,9 +235,9 @@ def apply_beat_sounds(beats, input, beat_sound='beat', input_length=None, bar_po
 def apply_circles(beats, video, keep_audio, output, expected_length = 0, bar_pos=None):
     filters = []
     pts_in = [
-        '-i "{}"'.format(video),
-        '-i "Resources/circle.png"',
-        '-i "Resources/end_circle.png"'
+        '-i', video,
+        '-i', 'Resources/circle.png',
+        '-i', 'Resources/end_circle.png'
     ]
     
     filters.append('[2]scale=32:32[circleend]')
@@ -303,26 +292,26 @@ def apply_circles(beats, video, keep_audio, output, expected_length = 0, bar_pos
         vnum += 1
         
     pts_out = [
-        '-c:v {}'.format(util.video_ctx.video_codec),
-        '-map [v{}]'.format(vnum)
+        '-c:v', util.video_ctx.video_codec,
+        '-map', '[v{}]'.format(vnum)
     ]
     
     if keep_audio:
-        pts_out.append('-map 0:a')
+        pts_out += ['-map', '0:a']
 
-    pts_out.append('"{}"'.format(output))
+    pts_out.append(output)
     ffmpeg_run(pts_in, filters, pts_out, expected_length=expected_length, description="Applying beat circles")
         
     return True
 
 def video_merge_audio(video, audio, output, input_length):
     ffmpeg_run([
-        '-i "{}"'.format(video),
-        '-i "{}"'.format(audio)
+        '-i', video,
+        '-i', audio
     ], None, [
-        '-map 0:v',
-        '-map 1:a',
-        '-c:v copy',
-        '-c:a copy',
+        '-map', '0:v',
+        '-map', '1:a',
+        '-c:v', 'copy',
+        '-c:a', 'copy',
         '"{}"'.format(output)
     ], expected_length=input_length, description="Merging video and audio")

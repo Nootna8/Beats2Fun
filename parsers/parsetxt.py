@@ -1,7 +1,7 @@
 import os
 from . import BeatInput, BeatOption, BeatList
 
-file_desc = 'Beat txt (*.txt)|*.txt"'
+file_desc = 'Beat txt (*.txt)|*.txt'
 class TXTParser(BeatInput):
     file_desc = file_desc
     extensions = ['.txt', '.ssc']

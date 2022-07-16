@@ -26,6 +26,7 @@ class VideoContext:
         self.threads = threads
         self.frame_time = 1/self.fps
         self.video_codec = video_codec
+
 class LoadedVideo:
     file: str
     width: int
@@ -40,10 +41,10 @@ class LoadedVideo:
     def __init__(self, file):
         self.file = file
         result = videoutil.ffprobe_run([
-            '-show_entries format=duration',
-            '-show_entries stream=width,height,codec_type,channels',
-            '-print_format json',
-            '-i "{}"'.format(self.file)
+            '-show_entries', 'format=duration',
+            '-show_entries', 'stream=width,height,codec_type,channels',
+            '-print_format', 'json',
+            '-i', self.file
         ])
 
         result = json.loads(result)
@@ -132,9 +133,9 @@ class VideoClip:
 
     def ffmpeg_options(self, vctx: VideoContext, subindex):
         cmd_in = [
-            '-ss {}'.format(videoutil.timestamp(max(0, self.start))),
-            '-t {}'.format(self.beat.duration + 0.5),
-            '-i "{}"'.format(self.video.file),
+            '-ss', videoutil.timestamp(max(0, self.start)),
+            '-t', self.beat.duration + 0.5,
+            '-i', self.video.file,
         ]
         filters = ['fps={}'.format(vctx.fps)]
         cmd_out = []
@@ -155,28 +156,28 @@ class VideoClip:
                     filters.append('crop={}'.format(vctx.resolution))
 
         cmd_out += [
-            '-vf "{}"'.format(','.join(filters)),
-            '-map {}:v'.format(subindex),
-            '-vframes {}'.format(self.framecount)
+            '-vf', ','.join(filters),
+            '-map', '{}:v'.format(subindex),
+            '-vframes', self.framecount
         ]
 
         if vctx.volume > 0:
             cmd_out += [
-                '-ac 2',
-                '-ar:a 48000',
-                '-af "atrim=duration={length},apad=whole_dur={length}:packet_size=64"'.format(length = vctx.frame_time * self.framecount),
+                '-ac', '2',
+                '-ar:a', '48000',
+                '-af', 'atrim=duration={length},apad=whole_dur={length}:packet_size=64'.format(length = vctx.frame_time * self.framecount),
                 #'-af "atrim=duration={length}"'.format(length = vctx.frame_time * self.framecount),
                 '-shortest',
                 '-avoid_negative_ts make_zero',
                 # '-fflags +genpts',
-                '-map {}:a'.format(subindex),
+                '-map', '{}:a'.format(subindex),
                 '-c:a aac',
                 '-b:a 192k'
             ]
             
         cmd_out +=[
-            '-b:v {}'.format(vctx.bitrate),
-            '-c:v {}'.format('libx264'),
+            '-b:v', vctx.bitrate,
+            '-c:v', 'libx264',
             self.clip_file
         ]
 
@@ -189,9 +190,9 @@ class VideoClip:
         try:
             cmd = [
                 '-count_frames',
-                '-show_entries stream=nb_read_frames,channels,codec_type,duration',
-                '-print_format json',
-                '-i {}'.format(self.clip_file)
+                '-show_entries', 'stream=nb_read_frames,channels,codec_type,duration',
+                '-print_format', 'json',
+                '-i', self.clip_file
             ]
             result = json.loads(videoutil.ffprobe_run(cmd))
             framecount = -1

@@ -14,10 +14,10 @@ import parsers.parsesm
 import parsers.parsetxt
 
 loaded_parsers = [
-    parsers.parsefs,
-    parsers.parseosu,
-    parsers.parsesm,
-    parsers.parsetxt
+    parsers.parsefs.FSParser,
+    parsers.parseosu.OSUParser,
+    parsers.parsesm.SMParser,
+    parsers.parsetxt.TXTParser
 ]
 
 def find_beats(input, option=None, song_required=False):
@@ -42,11 +42,9 @@ def find_beatinput(beatinput: str, song_required: bool):
             if not os.path.isdir(path):
                 return False
 
-            if parsers.parsesm.SMParser.supports_input(path):
-                return True
-
-            if parsers.parseosu.OSUParser.supports_input(path):
-                return True
+            for p in loaded_parsers:
+                if p.supports_input(path):
+                    return True
 
             return False
 
@@ -55,14 +53,24 @@ def find_beatinput(beatinput: str, song_required: bool):
         beatinput = options[0]
         print("Randomly selected: {}".format(beatinput))
 
-    if parsers.parsesm.SMParser.supports_input(beatinput):
-        return parsers.parsesm.SMParser(beatinput)
-
-    if parsers.parseosu.OSUParser.supports_input(beatinput):
-        return parsers.parseosu.OSUParser(beatinput)
+    for p in loaded_parsers:
+        if p.supports_input(beatinput):
+            return p(beatinput)
 
     raise Exception("No beats avaiable for: {}".format(os.path.realpath(beatinput)))
     
+def file_select_options():
+    ret = []
+    exts = []
+    for p in loaded_parsers:
+        exts += p.file_desc.split("|")[1].split(";")
+        ret.append(p.file_desc)
+
+    ret = [
+        'All beat inputs ({})|{}'.format(', '.join(exts), ';'.join(exts))
+    ] + ret
+
+    return '|'.join(ret)
 
 def beat_density(beats, width=100, length=None):
     values = [0 for i in range(width)]

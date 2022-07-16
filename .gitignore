@@ -4,3 +4,4 @@ __pycache__
 out
 ffmpeg
 ffmpeg-release-full-shared.7z
+.github/test/data

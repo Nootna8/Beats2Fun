@@ -9,7 +9,7 @@ from glob import glob
 import fnmatch
 from . import BeatInput, BeatOption, BeatList
 
-file_desc = 'StepMania simfile (*.sm, *.ssc)|*.sm;*.ssc"'
+file_desc = 'StepMania simfile (*.sm, *.ssc)|*.sm;*.ssc'
 
 class SMBeatOption(BeatOption):
 
