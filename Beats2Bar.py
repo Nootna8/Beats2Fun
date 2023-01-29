@@ -144,7 +144,7 @@ def run(args):
       progress_expr="current / total * 100",
       timing_options = {'show_time_remaining':True},
       default_size=(610, 650),
-      image_dir=util.get_resource(''))
+      image_dir=util.get_resource('', False))
 def main():
     parser = GooeyParser(description='Add a beatbar to a music video')
     

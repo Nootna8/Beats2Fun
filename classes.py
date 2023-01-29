@@ -2,12 +2,19 @@ import os
 import random
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed, wait
+import threading
 from turtle import update
 from parsers import Beat
 
 import util
 import videoutil
 import math
+
+class ClipGenerationException(Exception):
+    def __init__(self, clip, *args: object) -> None:
+        self.clip = clip
+        super().__init__(*args)
+    pass
 
 class VideoContext:
     fps: int
@@ -17,8 +24,10 @@ class VideoContext:
     threads: int
     frame_time: float
     video_codec: str
+    ratio_fix: float
+    skin: str
 
-    def __init__(self, fps, resolution, volume, bitrate, threads, video_codec) -> None:
+    def __init__(self, fps, resolution, volume, bitrate, threads, video_codec, ratio_fix, skin) -> None:
         self.fps = fps
         self.resolution = resolution
         self.volume = volume
@@ -26,6 +35,8 @@ class VideoContext:
         self.threads = threads
         self.frame_time = 1/self.fps
         self.video_codec = video_codec
+        self.ratio_fix = ratio_fix
+        self.skin = skin
 
 class LoadedVideo:
     file: str
@@ -38,8 +49,16 @@ class LoadedVideo:
     end_at: float
     usable_duration: float
 
+    def fully_locked(self):
+        for c in self.clips:
+            if not c.lock:
+                return False
+
+        return True
+
     def __init__(self, file):
         self.file = file
+
         result = videoutil.ffprobe_run([
             '-show_entries', 'format=duration',
             '-show_entries', 'stream=width,height,codec_type,channels',
@@ -122,6 +141,8 @@ class VideoClip:
     framecount: int
     clip_file: str
     ffresult: dict
+    lock: bool
+    done: bool
 
     def __init__(self, video, beat, start, framecount):
         self.video = video
@@ -130,13 +151,31 @@ class VideoClip:
         self.end = self.start + self.beat.duration
         self.framecount = framecount
         self.clip_file = '{}/{}.mp4'.format(util.get_tmp_dir(), self.beat.index)
+        self.lock = False
+        self.done = False
 
-    def ffmpeg_options(self, vctx: VideoContext, subindex):
+    def ffmpeg_options(self, vctx: VideoContext, subindex, encoder):
         cmd_in = [
             '-ss', videoutil.timestamp(max(0, self.start)),
             '-t', self.beat.duration + 0.5,
-            '-i', self.video.file,
+            
         ]
+
+        scaler = 'scale'
+
+        if encoder == 'h264_nvenc':
+            scaler = 'scale_cuda'
+            
+            cmd_in += [
+                '-hwaccel', 'cuda',
+                '-hwaccel_output_format', 'cuda',
+                '-extra_hw_frames', '5'
+            ]
+
+        cmd_in += [
+            '-i', self.video.file
+        ]
+
         filters = ['fps={}'.format(vctx.fps)]
         cmd_out = []
 
@@ -146,13 +185,13 @@ class VideoClip:
             ratio2 = self.video.width / self.video.height
 
             if ratio1 == ratio2:
-                filters.append('scale={}'.format(vctx.resolution))
-            else:
-                if abs(ratio1-ratio2) > 0.4:
-                    filters.append('scale={}:force_original_aspect_ratio=decrease'.format(vctx.resolution))
+                filters.append('{}={}'.format(scaler, vctx.resolution))
+            elif vctx.ratio_fix != -1:
+                if abs(ratio1-ratio2) > vctx.ratio_fix:
+                    filters.append('{}={}:force_original_aspect_ratio=decrease'.format(scaler, vctx.resolution))
                     filters.append('pad={}:(ow-iw)/2:(oh-ih)/2'.format(vctx.resolution))
                 else:
-                    filters.append('scale={}:force_original_aspect_ratio=increase'.format(vctx.resolution))
+                    filters.append('{}={}:force_original_aspect_ratio=increase'.format(scaler, vctx.resolution))
                     filters.append('crop={}'.format(vctx.resolution))
 
         cmd_out += [
@@ -177,7 +216,7 @@ class VideoClip:
             
         cmd_out +=[
             '-b:v', vctx.bitrate,
-            '-c:v', 'libx264',
+            '-c:v', encoder,
             self.clip_file
         ]
 
@@ -211,18 +250,20 @@ class VideoClip:
 
             if util.video_ctx and util.video_ctx.volume > 0:
                 if channels > 2:
-                    raise Exception("Too many audio channels: {}".format(channels))
+                    raise ClipGenerationException(self, "Too many audio channels: {}".format(channels))
                 #if audio_lenth != video_length:
                 #    raise Exception("Audio / Video length not matching {} - {}".format(audio_lenth, video_length))
 
             if not framecount:
                 error = videoutil.ffprobe_run(cmd, False)
-                raise Exception("Packet count error: {}".format(error))
+                raise ClipGenerationException(self, "Packet count error: {}".format(error))
         except Exception as e:
-            raise Exception("(Clip check error {} might be corrupt, try again) Clip: {}, Error: {}".format(self.video.file, self.clip_file, str(e))) from e
+            raise ClipGenerationException(self, "(Clip check error {} might be corrupt, try again) Clip: {}, Error: {}".format(self.video.file, self.clip_file, str(e))) from e
 
         if framecount != self.framecount:
-            raise Exception("(Clip check error {} might be corrupt, try again) {} has {} frames instead of the requested {}".format(self.video.file, self.clip_file, framecount, self.framecount))
+            raise Exception(self, "(Clip check error {} might be corrupt, try again) {} has {} frames instead of the requested {}".format(self.video.file, self.clip_file, framecount, self.framecount))
+
+        self.done = True
 
 class VideoPool:
     folders = []
@@ -234,6 +275,7 @@ class VideoPool:
     def __init__(self, video_folders):
         self.folders = video_folders.split(',')
         self.futures = []
+        self.lock = threading.Lock()
 
     def find_videos(self, recursive, vctx, amount):
         self.videos = []
@@ -280,7 +322,12 @@ class VideoPool:
         random.shuffle(self.videos)
 
     def analyze_videos_thread(self, video, pbar):
-        self.videos.append(LoadedVideo(video))
+        try:
+            video = LoadedVideo(video)
+            self.videos.append(video)
+        except:
+            print('Video {} failed to analyze, skipping'.format(video))
+        
         pbar.update()
 
     def next_video(self) -> LoadedVideo:
@@ -328,25 +375,36 @@ class VideoPool:
             num_clips += len(v.clips)
 
         self.futures = []
+        self.clip_errors = []
 
         with util.Utqdm(total=num_clips, desc="Splitting videos") as pbar:
-            with ThreadPoolExecutor(max_workers=2) as executor2:
-                with ThreadPoolExecutor(max_workers=vctx.threads) as executor:
-                    for v in self.videos:
-                        for b in util.batch(v.clips, batch):
-                            future = executor.submit(self.generate_clips_thread, b, pbar, vctx, executor2)
-                            self.futures.append(future)
-                    
-                    for future in self.futures:
-                        try:
-                            futures2 = future.result()
-                            for f in futures2:
-                                f.result()
-                        except BaseException as e:
-                            executor2.shutdown(True, cancel_futures=True)
-                            executor.shutdown(True, cancel_futures=True)
-                            raise e
+
+            with ThreadPoolExecutor(max_workers=2) as clip_check_executor:
+                self.clip_check_executor = clip_check_executor
+
+                threads = []
+                if vctx.video_codec != 'libx264':
+                    gpu_thread = threading.Thread(target=self.generate_clips_thread_gpu, args=(pbar, vctx))
+                    gpu_thread.start()
+                    threads.append(gpu_thread)
+
+                
+                for x in range(0, vctx.threads):
+                    cpu_thread = threading.Thread(target=self.generate_clips_thread_cpu, args=(batch, pbar, vctx))
+                    cpu_thread.start()
+                    threads.append(cpu_thread)
+
+                for t in threads:
+                    t.join()
         
+        if len(self.clip_errors) > 0:
+            raise Exception("Got {} clip errors".format(len(self.clip_errors)))
+
+        for v in self.videos:
+            for c in v.clips:
+                if not c.done:
+                    raise Exception("Not all clips completed")
+
         videos_file_name = util.get_tmp_file('txt')
         with open(videos_file_name, 'w') as f:
             for i in range(num_clips):
@@ -354,31 +412,89 @@ class VideoPool:
 
         return videos_file_name
 
-    def generate_clips_thread(self, clips, pbar, vctx, executor):
+    
+    def assign_clip_work(self, amount, longest, vctx):
+        self.lock.acquire()
+
+        work = []
+        if longest:
+            clip = None
+            for v in self.videos:
+                for c in v.clips:
+                    if c.lock:
+                        continue
+
+                    clip_in, clip_filters, clip_out = c.ffmpeg_options(vctx, 0, 'h264_nvenc')
+                    all_filters = ' '.join(clip_filters)
+                    if 'pad=' in all_filters or 'crop=' in all_filters:
+                        continue
+
+                    if clip == None:
+                        clip = c
+                        continue
+                    if c.framecount > clip.framecount:
+                        clip = c
+            
+            if clip != None:
+                video_clips = [c for c in clip.video.clips if not c.lock]
+                video_clips.sort(key=lambda x: abs(x.start - clip.start))
+                work = video_clips[:amount]
+                work.sort(key=lambda x: x.start)
+        else:
+            for v in self.videos:
+                if v.fully_locked():
+                    continue
+                video_clips = [c for c in v.clips if not c.lock]
+                video_clips.sort(key=lambda x: x.start)
+                work = video_clips[:amount]
+
+        for w in work:
+            w.lock = True
+
+        self.lock.release()
+
+        return work
+
+    def generate_clips_thread_cpu(self, batch, pbar, vctx):
+        while len([v for v in self.videos if not v.fully_locked()]) > 0:
+            work = self.assign_clip_work(batch, False, vctx)
+
+            if len(work) == 0:
+                break
+
+            self.generate_clips_task(work, pbar, 'libx264', vctx)
+
+    def generate_clips_thread_gpu(self, pbar, vctx):
+        while len([v for v in self.videos if not v.fully_locked()]) > 0:
+            work = self.assign_clip_work(3, True, vctx)
+
+            if len(work) == 0:
+                break
+
+            self.generate_clips_task(work, pbar, vctx.video_codec, vctx)
+                
+    def generate_clips_task(self, clips, pbar, encoder, vctx):
         cmd_in = []
         filters = []
         cmd_out = []
 
         for i,c in enumerate(clips):
-            clip_in, clip_filters, clip_out = c.ffmpeg_options(vctx, i)
+            clip_in, clip_filters, clip_out = c.ffmpeg_options(vctx, i, encoder)
             cmd_in += clip_in
             filters += clip_filters
             cmd_out += clip_out
-        
-        
-        def line_callback(l):
-            if 'final ratefactor' in l:
-                pbar.update(1)
 
         try:
-            result = videoutil.ffmpeg_run(cmd_in, None, cmd_out, True, line_callback=line_callback, ignore_errors=True)
+            result = videoutil.ffmpeg_run(cmd_in, None, cmd_out, True, ignore_errors=True)
             for c in clips:
                 c.ffresult = result
         except Exception as e:
-            raise Exception("Clipping error {}, try again".format(str(e))) from e
+            self.clip_errors.append((clips, e))
+            return
 
-        
+        pbar.update(len(clips))
 
-        return [executor.submit(c.test_file) for c in clips]
+        return [self.clip_check_executor.submit(c.test_file) for c in clips]
+
 class PMVideo:
     output_path = None

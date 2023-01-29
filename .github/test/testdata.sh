@@ -1,5 +1,6 @@
 #!/bin/bash
 
+mkdir data
 unzip "Stamina Alley Part 1.zip" -d data
 ffmpeg -f lavfi -i color=color=red -t 120 data/red.mp4
 ffmpeg -f lavfi -i color=color=green -t 120 data/green.mp4

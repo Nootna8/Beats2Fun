@@ -3,6 +3,7 @@ import subprocess
 from subprocess import Popen, PIPE, STDOUT
 from concurrent.futures import ThreadPoolExecutor
 import datetime
+import configparser
 
 import os
 import sys
@@ -195,7 +196,7 @@ def from_timestamp(timestamp):
     a_timedelta = date_time - datetime.datetime(1900, 1, 1)
     return a_timedelta.total_seconds()
 
-def apply_beat_sounds(beats, input, beat_sound='beat', input_length=None, bar_pos=None, beat_volume=0):
+def apply_beat_sounds(beats, input, input_length=None, bar_pos=None, beat_volume=0):
     filename, ext = os.path.splitext(input)
 
     if ext in video_formats:
@@ -204,8 +205,7 @@ def apply_beat_sounds(beats, input, beat_sound='beat', input_length=None, bar_po
         input = temp_name
 
     video_audio_0 = AudioSegment.from_file(input)
-    if '.' not in beat_sound:
-        beat_sound = 'Resources/{}.mp3'.format(beat_sound)
+    beat_sound = util.get_resource('beat.mp3')
     
     beat_sound_0 = AudioSegment.from_file(beat_sound) + beat_volume
     
@@ -234,19 +234,30 @@ def apply_beat_sounds(beats, input, beat_sound='beat', input_length=None, bar_po
 
 def apply_circles(beats, video, keep_audio, output, expected_length = 0, bar_pos=None):
     filters = []
-    pts_in = [
+    pts_in = []
+
+    if util.video_ctx.video_codec == 'h264_nvenc':
+        pts_in += [
+            '-hwaccel', 'cuda'
+        ]
+
+    pts_in += [
         '-i', video,
-        '-i', 'Resources/circle.png',
-        '-i', 'Resources/end_circle.png'
+        '-i', util.get_resource('beat.png'),
+        '-i', util.get_resource('end_beat.png')
     ]
+
+    config = configparser.RawConfigParser()
+    config.read(util.get_resource('skin.ini'))
+    config = config['overlay']
     
-    filters.append('[2]scale=32:32[circleend]')
+    filters.append(config['beat_end'])
     
     num_beats = min(80, len(beats))
     beat_circles = []
     for n in range(num_beats):
         beat_circles.append({ 'index': n, 'beats': [] })
-        filters.append('[1]scale=32:32[circle{}]'.format(n))
+        filters.append(config['beat_size'].format(n))
     
     circle_index = 0
     for i,b in enumerate(beats):
@@ -257,11 +268,11 @@ def apply_circles(beats, video, keep_audio, output, expected_length = 0, bar_pos
             circle_index = 0
     
     vnum = 0
-    filters.append('[0]drawbox=0:ih*0.75:iw:50:color=black@0.7:t=fill[v{}]'.format(vnum+1))
+    filters.append(config['background'].format(vnum+1))
     vnum += 1
     
     # Beat circle receiver overlay
-    filters.append('[v{}][circleend]overlay=40:(H*0.75)+8[v{}]'.format(
+    filters.append(config['beat_receiver'].format(
         vnum,
         vnum+1
     ))
@@ -282,7 +293,7 @@ def apply_circles(beats, video, keep_audio, output, expected_length = 0, bar_pos
                 x_expression=x_expression
             )
             
-        filters.append("[v{vin}][circle{i}]overlay=y=(H*0.75)+8:x='40+(W/5)*({x_expression}-t)':[v{vout}]".format(
+        filters.append(config['beat_position'].format(
             x_expression = x_expression,
             vin = vnum,
             vout = vnum+1,
@@ -300,7 +311,7 @@ def apply_circles(beats, video, keep_audio, output, expected_length = 0, bar_pos
         pts_out += ['-map', '0:a']
 
     pts_out.append(output)
-    ffmpeg_run(pts_in, filters, pts_out, expected_length=expected_length, description="Applying beat circles")
+    ffmpeg_run(pts_in, filters, pts_out, expected_length=expected_length, description="Applying overlay")
         
     return True
 

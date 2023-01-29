@@ -49,7 +49,9 @@ class Beats2FunTask:
             self.volume,
             self.bitrate,
             self.threads,
-            'libx264'
+            'libx264',
+            self.ratio_fix,
+            self.beatbar_skin
         )
 
         if self.cuda:
@@ -156,7 +158,7 @@ class Beats2FunTask:
                 audio_input = self.last_output
 
             video_future = executor.submit(videoutil.apply_circles, self.beat_option.beat_list.beats, self.last_output, False, tmp_vid, bar_pos=0, expected_length=self.length)
-            audio_future = executor.submit(videoutil.apply_beat_sounds, self.beat_option.beat_list.beats, audio_input, bar_pos=1, beat_sound=self.beatbar_sound, beat_volume=self.beatbar_volume)
+            audio_future = executor.submit(videoutil.apply_beat_sounds, self.beat_option.beat_list.beats, audio_input, bar_pos=1, beat_volume=self.beatbar_volume)
 
             video_result = video_future.result()
             audio_result = audio_future.result()
@@ -189,7 +191,7 @@ class Beats2FunTask:
       progress_expr="current / total * 100",
       timing_options = {'show_time_remaining':True},
       default_size=(550, 650),
-      image_dir=util.get_resource(''))
+      image_dir=util.get_resource('', False))
 def main():
     parser = GooeyParser(
         description='Make a PMV based on a simfile',
@@ -233,11 +235,12 @@ def main():
     parser.add_argument('-beat_dist',   metavar="Beat distance",    type=float)
     parser.add_argument('-volume',      metavar="Clip volume",      default=0.0, help='Keep the original clip audio', type=float, widget='DecimalField')
     parser.add_argument('-level',       metavar="Chart level",      default='min', help='What difficilty to pick from the chart, min/max/rnd/LEVEL', type=str)
-
+    parser.add_argument('-ratio_fix',   metavar="Remove back bars", default=0.4, help='How strongly the same aspect ratio is enforced (-1 to disable, for example with VR)', type=float, widget='DecimalField')
+    
     beatbar_group = parser.add_argument_group("BeatBar Options")
     beatbar_group.add_argument('-beatbar',         metavar="Beatbar",          help='Add a beatbar to the output video', action='store_true')
-    beatbar_group.add_argument('-beatbar_sound',   metavar="Beatbar sound",    help='What sound effect to use (none to disable)', default='beat')
     beatbar_group.add_argument('-beatbar_volume',  metavar="Beatbar volume",   help='Beat sound volume multiplier (db)', default=0, type=float, widget='DecimalField')
+    beatbar_group.add_argument('-beatbar_skin',    metavar="Skin / Theme",     help='Point to a folder containing the skin files. Copy the Resource folder as a template', widget='DirChooser')
 
     quality_group = parser.add_argument_group("Quality Options")   
     quality_group.add_argument('-fps',         metavar="FPS",              default=25, help='Output video FPS', type=int, widget='IntegerField')
@@ -260,9 +263,9 @@ def main():
     if util.app_mode == 'goo':    
         util.config_save('Beats2Fun.last', vars(args))
 
-    if args.cuda and args.batch > 1:
-        print("When using cuda, '-batch 1' is required")
-        sys.exit(1)
+    # if args.cuda and args.batch > 1:
+    #     print("When using cuda, '-batch 1' is required")
+    #     sys.exit(1)
 
     pts = args.resolution.split(':')
     if len(pts) != 2 or (int(pts[0]) %2) > 0 or (int(pts[1]) %2) > 0:

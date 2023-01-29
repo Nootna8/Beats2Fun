@@ -145,9 +145,12 @@ def batch(iterable, n=1):
 def clamp(n, smallest, largest): 
     return max(smallest, min(n, largest))
     
-def get_resource(name):
-    d = dirname(abspath(__file__))
-    
-    ret = os.path.realpath(d  + "/Resources/" + name)
+def get_resource(name, skinable=True):
+    if skinable and video_ctx.skin:
+        ret = os.path.realpath(video_ctx.skin + "/" + name)    
+    else:
+        d = dirname(abspath(__file__))
+        ret = os.path.realpath(d  + "/Resources/" + name)
+
     return ret
 
