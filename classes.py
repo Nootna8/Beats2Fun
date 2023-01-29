@@ -442,11 +442,12 @@ class VideoPool:
                 work.sort(key=lambda x: x.start)
         else:
             for v in self.videos:
-                if v.fully_locked():
-                    continue
                 video_clips = [c for c in v.clips if not c.lock]
+                if len(video_clips) == 0:
+                    continue
                 video_clips.sort(key=lambda x: x.start)
                 work = video_clips[:amount]
+                break
 
         for w in work:
             w.lock = True
@@ -460,6 +461,7 @@ class VideoPool:
             work = self.assign_clip_work(batch, False, vctx)
 
             if len(work) == 0:
+                print('CPU work done')
                 break
 
             self.generate_clips_task(work, pbar, 'libx264', vctx)
@@ -469,6 +471,7 @@ class VideoPool:
             work = self.assign_clip_work(3, True, vctx)
 
             if len(work) == 0:
+                print('GPU work done')
                 break
 
             self.generate_clips_task(work, pbar, vctx.video_codec, vctx)
@@ -490,6 +493,7 @@ class VideoPool:
                 c.ffresult = result
         except Exception as e:
             self.clip_errors.append((clips, e))
+            print("Clipping error detected")
             return
 
         pbar.update(len(clips))

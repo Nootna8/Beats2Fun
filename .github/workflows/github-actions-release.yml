@@ -39,39 +39,62 @@ jobs:
       shell: bash -l {0}
       run: |
         cd ${{ github.workspace }}
-        python Beats2Fun.py ".github/test/1631947 KUMOKIRI - Shippuujinrai.osz" .github/test/data out -debug
-        python Beats2Fun.py ".github/test/data/Powerflux" .github/test/data out -debug
+        mkdir ${{ github.workspace }}/out
+        python Beats2Fun.py ".github/test/1631947 KUMOKIRI - Shippuujinrai.osz" .github/test/data ${{ github.workspace }}/out -debug -beatbar
+        python Beats2Fun.py ".github/test/data/Stamina Alley Part 1/Powerflux" .github/test/data ${{ github.workspace }}/out -debug -beatbar
+
+    - uses: actions/upload-artifact@v2
+      with:
+        name: Test1.mp4
+        path: ./out/YZYX - Powerflux.mp4
+    - uses: actions/upload-artifact@v2
+      with:
+        name: Test2.mp4
+        path: ./out/KUMOKIRI - Shippuujinrai.mp4
 
   build:
 
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
 
     steps:
     - uses: actions/checkout@v2
 
-    - name: Install requirements
-      run: sudo apt-get install -y p7zip-full nsis
-      
+    - name: "Requirements"
+      run: |
+        choco install miniconda3 --params="'/AddToPath:1'"
+        choco install nsis 7zip
+        conda install -c conda-forge wxpython
+        pip install -r requirements.txt
+        pip install pyinstaller
+
     - name: Building using pyinstaller
       run: |
         cp .github/*.spec .
-        docker run -v "${{ github.workspace }}:/src" batonogov/pyinstaller-windows:python_3.9
-        
-    - name: Download and unpacking ffmpeg
-      run: |
-        wget https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full-shared.7z 
-        7z e ./ffmpeg-release-full-shared.7z -odist/Beats2Fun -ir\!bin
-        
-    - name: Create windows installer
-      run: makensis .github/Beats2Fun.nsi
+        pyinstaller
+
+    # - name: Install requirements
+    #   run: sudo apt-get install -y p7zip-full nsis
       
-    - uses: actions/upload-artifact@v2
-      with:
-        name: Beats2Fun
-        path: ./dist/Beats2Fun
+    # - name: Building using pyinstaller
+    #   run: |
+    #     cp .github/*.spec .
+    #     docker run --rm -v "${{ github.workspace }}:/src" --entrypoint=/src/.github/entry_build.sh -it batonogov/pyinstaller-windows:latest
+        
+    # - name: Download and unpacking ffmpeg
+    #   run: |
+    #     wget https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full-shared.7z 
+    #     7z e ./ffmpeg-release-full-shared.7z -odist/Beats2Fun -ir\!bin
+        
+    # - name: Create windows installer
+    #   run: makensis .github/Beats2Fun.nsi
       
-    - uses: actions/upload-artifact@v2
-      with:
-        name: Beats2Fun-setup.exe
-        path: ./dist/Beats2Fun-setup.exe
+    # - uses: actions/upload-artifact@v2
+    #   with:
+    #     name: Beats2Fun
+    #     path: ./dist/Beats2Fun
+      
+    # - uses: actions/upload-artifact@v2
+    #   with:
+    #     name: Beats2Fun-setup.exe
+    #     path: ./dist/Beats2Fun-setup.exe
     
